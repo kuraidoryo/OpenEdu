@@ -1,5 +1,13 @@
 import { CapacitorHttp, type HttpResponse } from '@capacitor/core';
-import type { DayOfWeek, Grade, Lesson, LessonChangeInfo, Message, MessageAttachment, MessageFolder } from '@/models/types';
+import type {
+  DayOfWeek,
+  Grade,
+  Lesson,
+  LessonChangeInfo,
+  Message,
+  MessageAttachment,
+  MessageFolder,
+} from '@/models/types';
 import type { IVulcanDataProvider, SessionInfo } from './IVulcanProvider';
 import { SessionExpiredError, VulcanApiError } from './errors';
 import {
@@ -15,16 +23,18 @@ import {
  *
  * Uses `CapacitorHttp` – on Android/iOS requests go through the native HTTP
  * stack, so browser CORS rules do not apply and we can send `Cookie` and
- * `User-Agent` headers. (In a desktop browser CapacitorHttp falls back to
- * `fetch`, where these headers are forbidden and CORS applies – Live mode is
- * therefore intended for the native app.)
+ * `User-Agent` headers.
  *
- * ⚠️ The web API is undocumented. Response parsing is deliberately defensive
- * (multiple possible field names) – adjust mappers below if VULCAN changes it.
+ * Endpoint paths, query parameters and JSON schemas match the real
+ * `uczen.eduvulcan.pl` and `wiadomosci.eduvulcan.pl` web applications.
  */
 
 export interface LiveProviderOptions {
-  /** Raw `Cookie` header value copied from an authenticated eduvulcan.pl session. */
+  /**
+   * Raw `Cookie` header value copied from an authenticated eduvulcan.pl session.
+   * Should contain cookies for `uczen.eduvulcan.pl` (`Eduvulcan.Uczen.Sso`) and
+   * `wiadomosci.eduvulcan.pl` (`EduVulcan.Wiadomosci.Sso`).
+   */
   sessionCookie: string;
   /** School/municipality symbol (see `AuthSession.tenant`). */
   tenant: string;
@@ -33,12 +43,14 @@ export interface LiveProviderOptions {
 type HttpMethod = 'GET' | 'POST';
 type Json = Record<string, unknown>;
 
-/** Student context resolved from the `Context` endpoint. */
+/** Student context resolved from `/api/Context` + `/api/OkresyKlasyfikacyjne`. */
 interface StudentContext {
   userName: string;
   schoolName: string;
   studentKey: string;
-  periodId?: string | number;
+  diaryId?: number;
+  periodId?: number | string;
+  mailboxGlobalKey?: string;
 }
 
 // ───────────────────────────── Parsing helpers ─────────────────────────────
@@ -80,15 +92,26 @@ function hashId(prefix: string, ...parts: string[]): string {
   return `${prefix}-${(h >>> 0).toString(36)}`;
 }
 
-/** Normalises "8:00", "08:00:00" or an ISO date-time into "HH:mm". */
+/** Normalises "8:00", "08:00:00" or an ISO date-time ("2026-11-18T08:50:00+01:00") into "HH:mm". */
 function toHHmm(value: string): string {
   if (!value) return '';
-  const iso = value.includes('T') ? value.split('T')[1] : value;
-  const [h = '0', m = '0'] = iso.split(':');
+  const timePart = value.includes('T') ? value.split('T')[1] : value;
+  const [h = '0', m = '0'] = timePart.split(':');
   return `${h.padStart(2, '0')}:${m.padStart(2, '0').slice(0, 2)}`;
 }
 
+/**
+ * Parses either an ISO 8601 date string OR Polish `DD.MM.YYYY` format (used by
+ * `dataOceny` in `/api/Oceny`) into a valid ISO 8601 string.
+ */
 function toIsoDate(value: string): string {
+  if (!value) return new Date().toISOString();
+  const dmyMatch = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(value.trim());
+  if (dmyMatch) {
+    const [, day, month, year] = dmyMatch;
+    const d = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
@@ -105,7 +128,16 @@ function htmlToText(html: string): string {
   return (doc.body.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** Monday 00:00 and Sunday 23:59 of the week containing `date`. */
+/**
+ * Cleans eduVULCAN correspondent strings like
+ * `"Kowalski Jan [KJ] - P - (SP123)"` into a cleaner display form while keeping full context.
+ */
+function cleanCorrespondent(raw: string): string {
+  if (!raw) return 'Nieznany nadawca';
+  return raw.replace(/\s+-\s+[PURO]\s+-\s+\([^)]+\)$/i, '').trim() || raw.trim();
+}
+
+/** Monday 00:00:00.000 and Sunday 23:59:59.999 (local time) of the week containing `date`. */
 function weekRange(date: Date): { from: Date; to: Date } {
   const from = new Date(date);
   const day = (from.getDay() + 6) % 7; // 0 = Monday
@@ -117,9 +149,6 @@ function weekRange(date: Date): { from: Date; to: Date } {
   return { from, to };
 }
 
-const ymd = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
 // ───────────────────────────── Provider ─────────────────────────────
 
 export class LiveVulcanProvider implements IVulcanDataProvider {
@@ -128,7 +157,6 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
   private readonly cookie: string;
   private readonly tenant: string;
   private context?: StudentContext;
-  private mailboxKey?: string;
 
   constructor(options: LiveProviderOptions) {
     if (!options.sessionCookie.trim()) throw new SessionExpiredError('Brak ciasteczka sesyjnego eduVULCAN.');
@@ -146,9 +174,7 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
       'User-Agent': BROWSER_USER_AGENT,
       Accept: 'application/json, text/plain, */*',
       'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
-      'X-Requested-With': 'XMLHttpRequest',
-      Origin: origin,
-      Referer: `${origin}/`,
+      Referer: `${origin}/${encodeURIComponent(this.tenant)}/App`,
     };
   }
 
@@ -232,22 +258,49 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
     const student = asObj(students[0] ?? raw);
 
     const studentKey = str(student, 'key', 'klucz', 'Key');
-    if (!studentKey) throw new VulcanApiError('Nie znaleziono ucznia w kontekście sesji.');
+    if (!studentKey) throw new VulcanApiError('Nie znaleziono klucza ucznia w /api/Context.');
 
-    const periods = asArr(student.okresy ?? student.Okresy ?? student.periods).map(asObj);
-    const now = Date.now();
-    const current =
-      periods.find((p) => {
-        const from = Date.parse(str(p, 'dataOd', 'from'));
-        const to = Date.parse(str(p, 'dataDo', 'to'));
-        return from <= now && now <= to;
-      }) ?? periods[periods.length - 1];
+    const diaryId = num(student, NaN, 'idDziennik', 'IdDziennik');
+    const mailboxGlobalKey = str(student, 'globalKeySkrzynka', 'GlobalKeySkrzynka') || undefined;
+
+    // Fetch classification periods from `/api/OkresyKlasyfikacyjne?key=...&idDziennik=...`
+    let periodId: number | string | undefined;
+    try {
+      const periodsRaw = await this.request(
+        'GET',
+        this.studentUrl(EP.student.periods, {
+          key: studentKey,
+          idDziennik: Number.isFinite(diaryId) ? diaryId : undefined,
+        }),
+      );
+      const periods = asArr(periodsRaw).map(asObj);
+      const now = Date.now();
+      const current =
+        periods.find((p) => {
+          const from = Date.parse(str(p, 'dataOd', 'from'));
+          const to = Date.parse(str(p, 'dataDo', 'to'));
+          return from <= now && now <= to;
+        }) ?? periods[periods.length - 1];
+
+      if (current) {
+        const numericId = num(current, NaN, 'id', 'Id');
+        periodId = Number.isFinite(numericId) ? numericId : str(current, 'id', 'Id');
+      }
+    } catch (err) {
+      if (err instanceof SessionExpiredError) throw err;
+      console.warn('[LiveVulcanProvider] Could not fetch OkresyKlasyfikacyjne', err);
+    }
+
+    const oddzial = str(student, 'oddzial', 'Oddzial');
+    const jednostka = str(student, 'jednostka', 'nazwaJednostki', 'szkola', 'school') || this.tenant;
 
     this.context = {
       studentKey,
+      diaryId: Number.isFinite(diaryId) ? diaryId : undefined,
+      periodId,
+      mailboxGlobalKey,
       userName: str(student, 'uczen', 'imieNazwisko', 'nazwa', 'name') || 'Uczeń',
-      schoolName: str(student, 'jednostka', 'nazwaJednostki', 'szkola', 'oddzial', 'school') || this.tenant,
-      periodId: current ? str(current, 'id', 'Id') : undefined,
+      schoolName: oddzial ? `${jednostka} (${oddzial})` : jednostka,
     };
     return this.context;
   }
@@ -259,20 +312,11 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
 
   // ─────────────── Messages ───────────────
 
-  private async getMailboxKey(): Promise<string> {
-    if (this.mailboxKey) return this.mailboxKey;
-    const boxes = asArr(await this.request('GET', this.messagesUrl(EP.messages.mailboxes))).map(asObj);
-    const key = boxes.length ? str(boxes[0], 'globalKey', 'GlobalKey', 'id') : '';
-    if (!key) throw new VulcanApiError('Nie znaleziono skrzynki wiadomości.');
-    this.mailboxKey = key;
-    return key;
-  }
-
   private mapMessageHeader(raw: Json, folder: MessageFolder): Message {
     const id = str(raw, 'apiGlobalKey', 'globalKey', 'id', 'Id');
     return {
       id: id || hashId('msg', str(raw, 'temat'), str(raw, 'data')),
-      sender: str(raw, 'korespondenci', 'nadawca', 'odbiorcy', 'sender') || 'Nieznany nadawca',
+      sender: cleanCorrespondent(str(raw, 'korespondenci', 'nadawca', 'odbiorcy', 'sender')),
       subject: str(raw, 'temat', 'subject') || '(bez tematu)',
       content: htmlToText(str(raw, 'tresc', 'content')),
       dateSent: toIsoDate(str(raw, 'data', 'dataWyslania', 'date')),
@@ -283,11 +327,15 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
   }
 
   private async fetchFolder(folder: MessageFolder): Promise<Message[]> {
-    const mailbox = await this.getMailboxKey();
+    // `/api/Odebrane?idLastWiadomosc=0&pageSize=50` and `/api/Wyslane?idLastWiadomosc=0&pageSize=50`
+    // return messages across all of the user's mailboxes without requiring a separate `/api/Skrzynki` lookup.
     const path = folder === 'inbox' ? EP.messages.inbox : EP.messages.sent;
     const raw = await this.request(
       'GET',
-      this.messagesUrl(path, { idSkrzynka: mailbox, lastId: -2147483648, pageSize: MESSAGES_PAGE_SIZE }),
+      this.messagesUrl(path, {
+        idLastWiadomosc: 0,
+        pageSize: MESSAGES_PAGE_SIZE,
+      }),
     );
     return asArr(raw).map((m) => this.mapMessageHeader(asObj(m), folder));
   }
@@ -298,12 +346,15 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
     return [...inbox, ...sent].sort((a, b) => b.dateSent.localeCompare(a.dateSent));
   }
 
-  /** Full message details (body + attachments). */
+  /** Full message details (body + attachments) from `/api/WiadomoscSzczegoly?apiGlobalKey={GUID}`. */
   async fetchMessageDetails(id: string): Promise<{ content: string; attachments: MessageAttachment[] }> {
     const raw = asObj(await this.request('GET', this.messagesUrl(EP.messages.details, { apiGlobalKey: id })));
     const attachments = asArr(raw.zalaczniki ?? raw.attachments).map((a) => {
       const att = asObj(a);
-      return { name: str(att, 'nazwaPliku', 'nazwa', 'name') || 'załącznik', url: str(att, 'url', 'link') };
+      return {
+        name: str(att, 'nazwaPliku', 'nazwa', 'name') || 'załącznik',
+        url: str(att, 'url', 'link'),
+      };
     });
     return { content: htmlToText(str(raw, 'tresc', 'content')), attachments };
   }
@@ -313,10 +364,12 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
   }
 
   async markMessageAsRead(id: string): Promise<void> {
+    // In eduVULCAN web, GET `/api/WiadomoscSzczegoly?apiGlobalKey={GUID}` marks the message as read
+    // server-side as a side effect. When `openMessage()` already fetched details, this is a no-op;
+    // otherwise we trigger a lightweight details GET.
     try {
-      await this.request('POST', this.messagesUrl(EP.messages.markAsRead), { apiGlobalKey: id });
+      await this.request('GET', this.messagesUrl(EP.messages.details, { apiGlobalKey: id }));
     } catch (err) {
-      // Opening details usually marks the message as read anyway – only auth errors matter.
       if (err instanceof SessionExpiredError) throw err;
     }
   }
@@ -328,33 +381,74 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
     const raw = asObj(
       await this.request(
         'GET',
-        this.studentUrl(EP.student.grades, { key: ctx.studentKey, idOkresKlasyfikacyjny: ctx.periodId }),
+        this.studentUrl(EP.student.grades, {
+          key: ctx.studentKey,
+          idOkresKlasyfikacyjny: ctx.periodId,
+        }),
       ),
     );
 
-    const subjects = asArr(raw.ocenyPrzedmiot ?? raw.przedmioty ?? raw.subjects ?? raw);
+    // Real schema: `{ ocenyPrzedmioty: [ { przedmiotNazwa, nauczyciele, kolumnyOcenyCzastkowe: [ { idKolumny, kategoriaKolumny, nazwaKolumny, oceny: [...] } ] } ] }`
+    const subjects = asArr(raw.ocenyPrzedmioty ?? raw.ocenyPrzedmiot ?? raw.przedmioty ?? raw.subjects ?? raw);
     const grades: Grade[] = [];
 
     for (const s of subjects.map(asObj)) {
       const subject = str(s, 'przedmiotNazwa', 'przedmiot', 'nazwa', 'subject') || 'Przedmiot';
-      const partial = asArr(s.ocenyCzastkowe ?? s.oceny ?? s.grades).map(asObj);
+      const defaultTeachers = asArr(s.nauczyciele)
+        .filter((t): t is string => typeof t === 'string')
+        .join(', ');
 
-      for (const g of partial) {
+      const columns = asArr(s.kolumnyOcenyCzastkowe);
+      if (columns.length > 0) {
+        for (const col of columns.map(asObj)) {
+          const colId = str(col, 'idKolumny', 'id');
+          const colCategory = str(col, 'kategoriaKolumny', 'kategoria');
+          const colName = str(col, 'nazwaKolumny', 'opis');
+          const entries = asArr(col.oceny).map(asObj);
+
+          entries.forEach((g, idx) => {
+            const value = str(g, 'wpis', 'wartosc', 'ocena', 'value');
+            if (!value) return;
+            const dateRaw = str(g, 'dataOceny', 'data', 'date');
+            const description = str(g, 'nazwaKolumny', 'opis', 'description') || colName;
+            const category = str(g, 'kategoriaKolumny', 'kategoria', 'category') || colCategory || 'Bieżące';
+            const teacher = str(g, 'nauczyciel', 'teacher') || defaultTeachers;
+
+            grades.push({
+              id:
+                str(g, 'id', 'Id') ||
+                hashId('grade', subject, colId || description, value, dateRaw, String(idx)),
+              subject,
+              value,
+              weight: num(g, 0, 'waga', 'weight'),
+              description,
+              date: toIsoDate(dateRaw),
+              teacher,
+              category,
+            });
+          });
+        }
+        continue;
+      }
+
+      // Fallback for flat `ocenyCzastkowe` / `oceny` arrays
+      const partial = asArr(s.ocenyCzastkowe ?? s.oceny ?? s.grades).map(asObj);
+      partial.forEach((g, idx) => {
         const value = str(g, 'wpis', 'wartosc', 'ocena', 'value');
-        if (!value) continue;
-        const date = str(g, 'dataOceny', 'data', 'date');
+        if (!value) return;
+        const dateRaw = str(g, 'dataOceny', 'data', 'date');
         const description = str(g, 'nazwaKolumny', 'opis', 'description');
         grades.push({
-          id: str(g, 'id', 'Id') || hashId('grade', subject, value, date, description),
+          id: str(g, 'id', 'Id') || hashId('grade', subject, value, dateRaw, description, String(idx)),
           subject,
           value,
           weight: num(g, 1, 'waga', 'weight'),
           description,
-          date: toIsoDate(date),
-          teacher: str(g, 'nauczyciel', 'nauczycielImieNazwisko', 'teacher'),
+          date: toIsoDate(dateRaw),
+          teacher: str(g, 'nauczyciel', 'nauczycielImieNazwisko', 'teacher') || defaultTeachers,
           category: str(g, 'kategoriaKolumny', 'kategoria', 'kodKolumny', 'category') || 'Inne',
         });
-      }
+      });
     }
     return grades;
   }
@@ -368,13 +462,15 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
       'GET',
       this.studentUrl(EP.student.timetable, {
         key: ctx.studentKey,
-        dataOd: ymd(from),
-        dataDo: ymd(to),
+        dataOd: from.toISOString(),
+        dataDo: to.toISOString(),
         zakresDanych: 2,
       }),
     );
 
-    return asArr(raw)
+    // Real schema: array of lessons with `data`, `godzinaOd`, `godzinaDo`, `prowadzacy`, `przedmiot`,
+    // `sala`, `adnotacja` (0 = normal, 3 = cancelled/changed) and `zmiany: [ { zmiana, nrLekcji, sala, prowadzacy, zajecia, informacjeNieobecnosc } ]`
+    const parsed = asArr(raw)
       .map(asObj)
       .map((l): Lesson => {
         const dateStr = str(l, 'data', 'date');
@@ -383,26 +479,54 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
         const dayOfWeek = (jsDay === 0 ? 7 : jsDay) as DayOfWeek;
         const startTime = toHHmm(str(l, 'godzinaOd', 'odGodziny', 'start'));
         const endTime = toHHmm(str(l, 'godzinaDo', 'doGodziny', 'end'));
-        const subject = str(l, 'przedmiot', 'subject') || 'Lekcja';
-        const lessonNumber = num(l, 0, 'pozycja', 'numerLekcji', 'nrLekcji', 'number');
+        const baseSubject = str(l, 'przedmiot', 'subject') || 'Lekcja';
 
-        const changes = asObj(l.zmiany ?? l.zmiana ?? l.change);
+        const changesArr = asArr(l.zmiany).map(asObj);
+        const firstChange = changesArr[0] ?? asObj(l.zmiana ?? l.change);
+        const adnotacja = num(l, 0, 'adnotacja');
+        const changeCode = num(firstChange, 0, 'zmiana');
+
+        const lessonNumber = num(
+          l,
+          num(firstChange, 0, 'nrLekcji'),
+          'pozycja',
+          'numerLekcji',
+          'nrLekcji',
+          'number',
+        );
+
+        const substitute = str(firstChange, 'prowadzacy', 'nauczyciel');
+        const newRoom = str(firstChange, 'sala');
+        const newSubject = str(firstChange, 'zajecia');
+        const changeText =
+          str(firstChange, 'informacjeNieobecnosc', 'informacja', 'opis') ||
+          str(l, 'informacja');
+
+        const isCancelled =
+          (bool(l, 'odwolana', 'isCancelled') ?? false) ||
+          changeCode === 1 ||
+          (adnotacja === 3 && !substitute && !newRoom && !newSubject);
+
         let changeInfo: LessonChangeInfo | undefined;
-        const cancelled = bool(l, 'odwolana', 'isCancelled') ?? bool(changes, 'odwolana');
-        const substitute = str(changes, 'prowadzacy', 'nauczyciel');
-        const newRoom = str(changes, 'sala');
-        const changeText = str(changes, 'informacja', 'opis') || str(l, 'informacja', 'adnotacja');
-
-        if (cancelled) {
+        if (isCancelled) {
           changeInfo = { type: 'cancelled', description: changeText || 'Lekcja odwołana' };
         } else if (substitute) {
-          changeInfo = { type: 'substitution', description: changeText || `Zastępstwo: ${substitute}`, substituteTeacher: substitute };
+          changeInfo = {
+            type: 'substitution',
+            description: changeText || `Zastępstwo: ${substitute}`,
+            substituteTeacher: substitute,
+          };
         } else if (newRoom) {
-          changeInfo = { type: 'room-change', description: changeText || `Zmiana sali: ${newRoom}`, newRoom };
-        } else if (changeText) {
-          changeInfo = { type: 'other', description: changeText };
+          changeInfo = {
+            type: 'room-change',
+            description: changeText || `Zmiana sali: ${newRoom}`,
+            newRoom,
+          };
+        } else if (changeText || adnotacja !== 0 || changeCode !== 0) {
+          changeInfo = { type: 'other', description: changeText || 'Zmiana w planie lekcji' };
         }
 
+        const subject = newSubject || baseSubject;
         return {
           id: str(l, 'id', 'Id') || hashId('lesson', dateStr, startTime, subject),
           dayOfWeek,
@@ -416,5 +540,17 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
         };
       })
       .sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime));
+
+    // When the API omits `nrLekcji` on normal lessons, assign sequential 1..N per day based on start time.
+    const counterByDay = new Map<DayOfWeek, number>();
+    for (const lesson of parsed) {
+      const nextNum = (counterByDay.get(lesson.dayOfWeek) ?? 0) + 1;
+      counterByDay.set(lesson.dayOfWeek, nextNum);
+      if (!lesson.lessonNumber) {
+        lesson.lessonNumber = nextNum;
+      }
+    }
+
+    return parsed;
   }
 }

@@ -1,14 +1,14 @@
 /**
  * eduVULCAN web endpoints configuration.
  *
- * ⚠️ eduVULCAN is a closed system and its web API is NOT publicly documented.
- * The paths below mirror the requests made by the official web front-end
- * (uczen.eduvulcan.pl / wiadomosci.eduvulcan.pl) and may change at any time.
+ * Verified against the live eduVULCAN web application
+ * (`uczen.eduvulcan.pl` and `wiadomosci.eduvulcan.pl`).
  * Keep ALL URLs in this single file so they can be updated in one place.
  *
  * Placeholders:
  *   {tenant} – school/municipality symbol from the URL after logging in,
  *              e.g. https://uczen.eduvulcan.pl/<tenant>/App/...
+ *              (also returned in `/api/Context` as `uczniowie[].config.projectClient`).
  */
 
 export const EDUVULCAN_ENDPOINTS = {
@@ -20,30 +20,72 @@ export const EDUVULCAN_ENDPOINTS = {
     loginRedirectMarkers: ['/logowanie', '/Account/Login', '/LoginEndpoint', 'login.eduvulcan.pl'],
   },
 
-  /** Student module (grades, timetable, context). */
+  /** Student module (`uczen.eduvulcan.pl`). */
   student: {
     base: 'https://uczen.eduvulcan.pl/{tenant}',
-    /** Returns logged-in user / student context (name, school, student key, periods). */
+    /**
+     * Returns logged-in student list (`uczniowie[]`) with `key` (base64),
+     * `idDziennik`, `uczen`, `oddzial`, `jednostka`, and `globalKeySkrzynka`.
+     */
     context: '/api/Context',
-    /** Grades for a given student key and classification period. */
+    /**
+     * Classification periods (semesters) for a student diary.
+     * Query params: `key`, `idDziennik`.
+     */
+    periods: '/api/OkresyKlasyfikacyjne',
+    /**
+     * Grades for a given student key and classification period.
+     * Query params: `key`, `idOkresKlasyfikacyjny`.
+     */
     grades: '/api/Oceny',
-    /** Timetable for a given student key and date range. */
+    /**
+     * Timetable for a given student key and UTC ISO date range.
+     * Query params: `key`, `dataOd` (ISO UTC), `dataDo` (ISO UTC), `zakresDanych` (2).
+     */
     timetable: '/api/PlanZajec',
+    /** Quick unread messages counter on the student portal. */
+    unreadCount: '/api/WiadomosciNieodczytane',
   },
 
-  /** Messages module. */
+  /** Messages module (`wiadomosci.eduvulcan.pl`). */
   messages: {
     base: 'https://wiadomosci.eduvulcan.pl/{tenant}',
-    /** Mailboxes available for the user. */
+    /** Entry route that establishes the `EduVulcan.Wiadomosci.Sso` cookie. */
+    appEntry: '/App',
+    /** Mailboxes available for the user (`[{ globalKey, nazwa, typUzytkownika }]`). */
     mailboxes: '/api/Skrzynki',
-    /** Inbox list (paged). */
+    /** Unread counts per mailbox (`[{ globalKey, liczbaWiadomosci }]`). */
+    unreadCounts: '/api/LiczbyNieodczytanych',
+    /**
+     * Inbox list across all mailboxes.
+     * Query params: `idLastWiadomosc` (0 for first page), `pageSize` (50).
+     */
     inbox: '/api/Odebrane',
-    /** Sent list (paged). */
+    /**
+     * Inbox list filtered by a specific mailbox.
+     * Query params: `globalKeySkrzynka`, `idLastWiadomosc`, `pageSize`.
+     */
+    inboxByMailbox: '/api/OdebraneSkrzynka',
+    /**
+     * Incremental poll for inbox messages newer than `idTopWiadomosc`.
+     * Query params: `idTopWiadomosc`.
+     */
+    inboxNew: '/api/OdebraneNowe',
+    /**
+     * Sent list across all mailboxes.
+     * Query params: `idLastWiadomosc` (0 for first page), `pageSize` (50).
+     */
     sent: '/api/Wyslane',
-    /** Message details by apiGlobalKey (opening usually marks it read server-side). */
+    /**
+     * Sent list filtered by a specific mailbox.
+     * Query params: `globalKeySkrzynka`, `idLastWiadomosc`, `pageSize`.
+     */
+    sentByMailbox: '/api/WyslaneSkrzynka',
+    /**
+     * Message details by `apiGlobalKey` (GUID).
+     * NOTE: Calling this GET endpoint automatically marks the message as read server-side.
+     */
     details: '/api/WiadomoscSzczegoly',
-    /** Explicitly mark messages as read. */
-    markAsRead: '/api/WiadomoscOdczytana',
   },
 } as const;
 
