@@ -1,19 +1,33 @@
-import { GraduationCap } from 'lucide-react';
+import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AppProvider } from '@/context/AppContext';
+import { MobileLayout } from '@/components/MobileLayout';
+import { MessagesPage } from '@/pages/MessagesPage';
+import { TimetablePage } from '@/pages/TimetablePage';
+import { GradesPage } from '@/pages/GradesPage';
+import { SettingsAuthPage } from '@/pages/SettingsAuthPage';
 
 /**
- * Temporary placeholder shell (Phase 1).
- * Routing, layout and pages are wired up in later phases.
+ * OpenEdu root application component.
+ *
+ * Uses `HashRouter` for full compatibility with Capacitor Android/iOS WebView
+ * file-based routing.
  */
 export default function App() {
   return (
-    <main className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-      <div className="rounded-2xl bg-brand-600 p-4 text-white shadow-lg">
-        <GraduationCap size={40} />
-      </div>
-      <h1 className="text-2xl font-bold">OpenEdu</h1>
-      <p className="max-w-xs text-sm text-slate-500 dark:text-slate-400">
-        Nieoficjalny, darmowy klient dziennika eduVULCAN. Projekt w budowie.
-      </p>
-    </main>
+    <AppProvider>
+      <HashRouter>
+        <Routes>
+          <Route element={<MobileLayout />}>
+            <Route index element={<Navigate to="/messages" replace />} />
+            <Route path="/messages" element={<MessagesPage />} />
+            <Route path="/messages/:messageId" element={<MessagesPage />} />
+            <Route path="/timetable" element={<TimetablePage />} />
+            <Route path="/grades" element={<GradesPage />} />
+            <Route path="/settings" element={<SettingsAuthPage />} />
+            <Route path="*" element={<Navigate to="/messages" replace />} />
+          </Route>
+        </Routes>
+      </HashRouter>
+    </AppProvider>
   );
 }

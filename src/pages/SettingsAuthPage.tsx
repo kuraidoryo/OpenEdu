@@ -1,0 +1,502 @@
+import { useState, type FormEvent } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import clsx from 'clsx';
+import {
+  Bell,
+  BellRing,
+  CheckCircle2,
+  Clock,
+  Cookie,
+  Database,
+  ExternalLink,
+  HelpCircle,
+  KeyRound,
+  LogIn,
+  LogOut,
+  Moon,
+  Monitor,
+  ShieldCheck,
+  Sparkles,
+  Sun,
+  Trash2,
+  UserCheck,
+} from 'lucide-react';
+import { EDUVULCAN_ENDPOINTS } from '@/api/endpoints.config';
+import { useApp } from '@/context/AppContext';
+import { getDatabaseStats } from '@/db/database';
+import { showToast } from '@/services/notification.service';
+import {
+  POLLING_INTERVALS,
+  type PollingInterval,
+  type ThemePreference,
+} from '@/services/session.service';
+
+export function SettingsAuthPage() {
+  const {
+    session,
+    settings,
+    switchMode,
+    loginDemo,
+    loginLive,
+    logout,
+    updateSettings,
+    clearOfflineData,
+    sendTestNotification,
+    requestNotificationPermission,
+  } = useApp();
+
+  const [tenantInput, setTenantInput] = useState(session.tenant || '');
+  const [cookieInput, setCookieInput] = useState(session.sessionCookie || '');
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
+  const [confirmClearDb, setConfirmClearDb] = useState(false);
+
+  const dbStats = useLiveQuery(
+    () => getDatabaseStats(),
+    [],
+    { messages: 0, grades: 0, lessons: 0 },
+  );
+
+  const handleLiveSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    if (!tenantInput.trim()) {
+      setAuthError('Podaj symbol szkoły / miasta z adresu URL (np. warszawa, gdansk).');
+      return;
+    }
+    if (!cookieInput.trim()) {
+      setAuthError('Wklej zawartość nagłówka Cookie z zalogowanej sesji eduvulcan.pl.');
+      return;
+    }
+
+    setIsConnecting(true);
+    try {
+      await loginLive({
+        tenant: tenantInput.trim(),
+        sessionCookie: cookieInput.trim(),
+      });
+      showToast('info', '✅ Połączono z eduVULCAN', 'Dane ucznia zostały pobrane i zapisane offline.');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Nie udało się zweryfikować sesji.');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleClearDatabase = async () => {
+    await clearOfflineData();
+    setConfirmClearDb(false);
+    showToast('info', '🗑️ Baza offline wyczyszczona', 'Usunięto lokalną kopię wiadomości, ocen i planu.');
+  };
+
+  const handleTestNotification = async () => {
+    await requestNotificationPermission();
+    await sendTestNotification();
+  };
+
+  const themeOptions: ReadonlyArray<{ value: ThemePreference; label: string; icon: typeof Sun }> = [
+    { value: 'system', label: 'Systemowy', icon: Monitor },
+    { value: 'light', label: 'Jasny', icon: Sun },
+    { value: 'dark', label: 'Ciemny', icon: Moon },
+  ];
+
+  return (
+    <div className="flex flex-col gap-4 p-3.5">
+      {/* ───────────── 1. Mode Switcher (Mock vs Live) ───────────── */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h1 className="text-sm font-bold text-slate-900 dark:text-white">
+              Tryb źródła danych
+            </h1>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Przełączaj między realistycznymi danymi Demo a prawdziwym kontem eduVULCAN.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800">
+          <button
+            type="button"
+            onClick={() => void switchMode('mock')}
+            className={clsx(
+              'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition',
+              session.mode === 'mock'
+                ? 'bg-violet-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white',
+            )}
+          >
+            <Sparkles size={15} />
+            <span>Tryb Demo (Mock)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void switchMode('live')}
+            className={clsx(
+              'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition',
+              session.mode === 'live'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white',
+            )}
+          >
+            <KeyRound size={15} />
+            <span>Tryb Live (eduVULCAN)</span>
+          </button>
+        </div>
+      </section>
+
+      {/* ───────────── 2. Current Session Status Card ───────────── */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div
+              className={clsx(
+                'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm',
+                session.isAuthenticated
+                  ? session.mode === 'mock'
+                    ? 'bg-violet-600'
+                    : 'bg-emerald-600'
+                  : 'bg-slate-400 dark:bg-slate-700',
+              )}
+            >
+              <UserCheck size={20} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                  {session.isAuthenticated ? session.userName || 'Aktywna sesja' : 'Nie zalogowano'}
+                </h2>
+                {session.isAuthenticated && (
+                  <CheckCircle2 size={14} className="text-emerald-500" />
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {session.isAuthenticated
+                  ? session.schoolName
+                  : 'Połącz konto poniżej lub włącz Tryb Demo.'}
+              </p>
+            </div>
+          </div>
+
+          {session.isAuthenticated ? (
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <LogOut size={13} />
+              <span>Wyloguj</span>
+            </button>
+          ) : (
+            session.mode === 'mock' && (
+              <button
+                type="button"
+                onClick={() => void loginDemo()}
+                className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700"
+              >
+                <LogIn size={13} />
+                <span>Wczytaj Demo</span>
+              </button>
+            )
+          )}
+        </div>
+      </section>
+
+      {/* ───────────── 3. Hybrid Login (WebView / Session Cookie) ───────────── */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Cookie size={17} className="text-brand-600 dark:text-brand-400" />
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Logowanie hybrydowe (eduVULCAN Live)
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowGuide((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-950/60"
+          >
+            <HelpCircle size={13} />
+            <span>{showGuide ? 'Ukryj instrukcję' : 'Jak pobrać sesję?'}</span>
+          </button>
+        </div>
+
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Autoryzacja wykorzystuje Twoją własną sesję przeglądarkową / WebView bez przesyłania hasła
+          do zewnętrznych serwerów.
+        </p>
+
+        {showGuide && (
+          <div className="mt-3 space-y-2 rounded-xl border border-brand-200/80 bg-brand-50/60 p-3 text-xs text-slate-700 dark:border-brand-900/60 dark:bg-brand-950/30 dark:text-slate-300">
+            <p className="font-bold text-brand-800 dark:text-brand-300">
+              Instrukcja logowania WebView / Cookie krok po kroku:
+            </p>
+            <ol className="list-decimal space-y-1.5 pl-4">
+              <li>
+                Zaloguj się na swoje konto w przeglądarce pod adresem{' '}
+                <a
+                  href={EDUVULCAN_ENDPOINTS.portal.login}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-0.5 font-semibold text-brand-600 underline dark:text-brand-400"
+                >
+                  eduvulcan.pl/logowanie <ExternalLink size={11} />
+                </a>{' '}
+                i przejdź do widoku ucznia oraz zakładki <em>Wiadomości</em>.
+              </li>
+              <li>
+                Z adresu URL typu{' '}
+                <code className="rounded bg-white px-1 py-0.5 text-[11px] dark:bg-slate-800">
+                  https://uczen.eduvulcan.pl/<strong>symbol</strong>/App/...
+                </code>{' '}
+                odczytaj <strong>symbol szkoły/miasta</strong> (`tenant`).
+              </li>
+              <li>
+                Otwórz Narzędzia deweloperskie (<kbd>F12</kbd> → zakładka <em>Network / Sieć</em>),
+                kliknij dowolne zapytanie do <code className="text-[11px]">/api/</code> i skopiuj
+                wartość nagłówka <strong>Cookie</strong> (zawierającego{' '}
+                <code className="text-[11px]">Eduvulcan.Uczen.Sso</code> oraz{' '}
+                <code className="text-[11px]">EduVulcan.Wiadomosci.Sso</code>).
+              </li>
+              <li>
+                Uwaga: ze względu na politykę CORS przeglądarek, zapytania Live z nagłówkiem{' '}
+                <code className="text-[11px]">Cookie</code> działają bezpośrednio w natywnej aplikacji
+                Android (przez <code className="text-[11px]">CapacitorHttp</code>).
+              </li>
+            </ol>
+          </div>
+        )}
+
+        <form onSubmit={(e) => void handleLiveSubmit(e)} className="mt-3 space-y-3">
+          <div>
+            <label
+              htmlFor="tenant-input"
+              className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              Symbol jednostki / miasta (tenant z URL)
+            </label>
+            <input
+              id="tenant-input"
+              type="text"
+              value={tenantInput}
+              onChange={(e) => setTenantInput(e.target.value)}
+              placeholder="np. warszawa, krakow, domyslny…"
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="cookie-input"
+              className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              Ciasteczko sesyjne (Cookie: Eduvulcan.Uczen.Sso=...; EduVulcan.Wiadomosci.Sso=...)
+            </label>
+            <textarea
+              id="cookie-input"
+              rows={3}
+              value={cookieInput}
+              onChange={(e) => setCookieInput(e.target.value)}
+              placeholder="Wklej zawartość nagłówka Cookie z eduvulcan.pl…"
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+          </div>
+
+          {authError && (
+            <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
+              {authError}
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="submit"
+              disabled={isConnecting}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700 active:scale-[0.99] disabled:opacity-60"
+            >
+              <LogIn size={15} />
+              <span>
+                {isConnecting ? 'Weryfikacja sesji…' : 'Zapisz sesję i przełącz na Tryb Live'}
+              </span>
+            </button>
+
+            <a
+              href={EDUVULCAN_ENDPOINTS.portal.login}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <span>Otwórz eduvulcan.pl</span>
+              <ExternalLink size={13} />
+            </a>
+          </div>
+        </form>
+      </section>
+
+      {/* ───────────── 4. Notifications & Polling Interval ───────────── */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Bell size={17} className="text-brand-600 dark:text-brand-400" />
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Powiadomienia i synchronizacja w tle
+            </h2>
+          </div>
+
+          <label className="relative inline-flex cursor-pointer items-center">
+            <input
+              type="checkbox"
+              checked={settings.notificationsEnabled}
+              onChange={(e) =>
+                void updateSettings({ notificationsEnabled: e.target.checked })
+              }
+              className="peer sr-only"
+            />
+            <div className="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-brand-600 peer-checked:after:translate-x-full dark:bg-slate-700" />
+          </label>
+        </div>
+
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Lokalny mechanizm Diff &amp; Notify wykrywa nowe wiadomości i oceny bez zewnętrznych
+          serwerów push.
+        </p>
+
+        {/* Polling Interval Selector (15 / 30 / 60 min) */}
+        <div className="mt-3">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+            <Clock size={13} />
+            <span>Interwał sprawdzania nowych wiadomości i ocen:</span>
+          </p>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {POLLING_INTERVALS.map((interval: PollingInterval) => {
+              const active = settings.pollingIntervalMin === interval;
+              return (
+                <button
+                  key={interval}
+                  type="button"
+                  onClick={() => void updateSettings({ pollingIntervalMin: interval })}
+                  className={clsx(
+                    'rounded-xl border py-2 text-xs font-bold transition',
+                    active
+                      ? 'border-brand-600 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-950/70 dark:text-brand-300'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
+                  )}
+                >
+                  Co {interval} min
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Test Notification Button */}
+        <button
+          type="button"
+          onClick={() => void handleTestNotification()}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50/80 px-3.5 py-2.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 active:scale-[0.99] dark:border-brand-800 dark:bg-brand-950/60 dark:text-brand-300"
+        >
+          <BellRing size={15} />
+          <span>Wyślij testowe powiadomienie</span>
+        </button>
+      </section>
+
+      {/* ───────────── 5. Appearance / Dark Mode ───────────── */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="text-sm font-bold text-slate-900 dark:text-white">Wygląd aplikacji</h2>
+        <div className="mt-2.5 grid grid-cols-3 gap-2">
+          {themeOptions.map(({ value, label, icon: Icon }) => {
+            const active = settings.theme === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => void updateSettings({ theme: value })}
+                className={clsx(
+                  'flex items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-semibold transition',
+                  active
+                    ? 'border-brand-600 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-950/70 dark:text-brand-300'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
+                )}
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ───────────── 6. Offline Database Maintenance ───────────── */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center gap-2">
+          <Database size={17} className="text-brand-600 dark:text-brand-400" />
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+            Lokalna baza danych Offline (Dexie / IndexedDB)
+          </h2>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/70">
+            <p className="text-base font-extrabold text-slate-900 dark:text-white">
+              {dbStats.messages}
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">Wiadomości</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/70">
+            <p className="text-base font-extrabold text-slate-900 dark:text-white">
+              {dbStats.grades}
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">Ocen</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/70">
+            <p className="text-base font-extrabold text-slate-900 dark:text-white">
+              {dbStats.lessons}
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">Lekcji</p>
+          </div>
+        </div>
+
+        {!confirmClearDb ? (
+          <button
+            type="button"
+            onClick={() => setConfirmClearDb(true)}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50/70 px-3.5 py-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-900/70 dark:bg-rose-950/50 dark:text-rose-300"
+          >
+            <Trash2 size={15} />
+            <span>Wyczyść lokalną bazę offline</span>
+          </button>
+        ) : (
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleClearDatabase()}
+              className="flex-1 rounded-xl bg-rose-600 py-2 text-xs font-bold text-white hover:bg-rose-700"
+            >
+              Tak, usuń dane offline
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmClearDb(false)}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              Anuluj
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* Privacy & Disclaimer Footer */}
+      <footer className="flex items-start gap-2 px-1 pb-2 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+        <ShieldCheck size={15} className="mt-0.5 shrink-0" />
+        <p>
+          OpenEdu działa w 100% lokalnie na Twoim urządzeniu. Projekt open-source, niepowiązany z
+          firmą VULCAN sp. z o.o.
+        </p>
+      </footer>
+    </div>
+  );
+}
+
+export default SettingsAuthPage;
