@@ -1,0 +1,35 @@
+import type { AppMode, Grade, Lesson, Message, MessageFolder } from '@/models/types';
+
+/** Basic info about the logged-in user, returned by `verifySession()`. */
+export interface SessionInfo {
+  userName: string;
+  schoolName: string;
+}
+
+/**
+ * Common contract for all data sources (Mock / Live).
+ *
+ * Implementations MUST throw `SessionExpiredError` (see `./errors`) when
+ * the session is invalid, so the sync layer can react uniformly.
+ */
+export interface IVulcanDataProvider {
+  readonly mode: AppMode;
+
+  /** Fetches message headers. Without `folder` returns both inbox and sent. */
+  fetchMessages(folder?: MessageFolder): Promise<Message[]>;
+
+  /** Fetches the full body of a single message. */
+  fetchMessageContent(id: string): Promise<string>;
+
+  /** Marks a message as read on the server side. */
+  markMessageAsRead(id: string): Promise<void>;
+
+  /** Fetches all grades for the current classification period. */
+  fetchGrades(): Promise<Grade[]>;
+
+  /** Fetches the timetable for the week containing `weekDate` (default: current week). */
+  fetchTimetable(weekDate?: Date): Promise<Lesson[]>;
+
+  /** Checks if the session is valid; throws `SessionExpiredError` if not. */
+  verifySession(): Promise<SessionInfo>;
+}

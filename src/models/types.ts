@@ -104,6 +104,11 @@ export interface AuthSession {
   schoolName: string;
   /** Raw `Cookie` header value for eduvulcan.pl (Live mode only). */
   sessionCookie: string;
+  /**
+   * School/municipality symbol from the eduVULCAN URL (Live mode only),
+   * e.g. `https://uczen.eduvulcan.pl/<tenant>/App/...`.
+   */
+  tenant: string;
   /** ISO 8601 date-time of the last successful sync, or null if never synced. */
   lastSync: string | null;
   mode: AppMode;
@@ -115,6 +120,7 @@ export const DEFAULT_SESSION: AuthSession = {
   userName: '',
   schoolName: '',
   sessionCookie: '',
+  tenant: '',
   lastSync: null,
   mode: 'mock',
 };
