@@ -1,4 +1,4 @@
-import { CapacitorHttp, type HttpResponse } from '@capacitor/core';
+import { Capacitor, CapacitorHttp, type HttpResponse } from '@capacitor/core';
 import type {
   DayOfWeek,
   DutyInfo,
@@ -19,7 +19,11 @@ import {
   REQUEST_TIMEOUT_MS,
   buildUrl,
 } from './endpoints.config';
-import { resolveCookieForUrl } from '@/services/vulcan-auth.plugin';
+import {
+  VulcanAuth,
+  resolveCookieForUrl,
+  unpackDomainCookies,
+} from '@/services/vulcan-auth.plugin';
 
 /**
  * Live eduVULCAN client.
@@ -160,6 +164,8 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
   private readonly cookie: string;
   private readonly tenant: string;
   private context?: StudentContext;
+  private contextPromise?: Promise<StudentContext>;
+  private cookiesRestored = false;
 
   constructor(options: LiveProviderOptions) {
     if (!options.sessionCookie.trim()) throw new SessionExpiredError('Brak ciasteczka sesyjnego eduVULCAN.');
@@ -170,15 +176,32 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
 
   // ─────────────── HTTP core ───────────────
 
+  private async ensureNativeCookiesRestored(): Promise<void> {
+    if (this.cookiesRestored || !Capacitor.isNativePlatform()) return;
+    const { uczenCookie, wiadomosciCookie } = unpackDomainCookies(this.cookie);
+    await VulcanAuth.restoreCookies({
+      uczenCookie,
+      wiadomosciCookie,
+      tenant: this.tenant,
+    }).catch(() => undefined);
+    this.cookiesRestored = true;
+  }
+
   private headersFor(url: string): Record<string, string> {
     const origin = new URL(url).origin;
-    return {
-      Cookie: resolveCookieForUrl(this.cookie, url),
+    const headers: Record<string, string> = {
       'User-Agent': BROWSER_USER_AGENT,
       Accept: 'application/json, text/plain, */*',
       'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
       Referer: `${origin}/${encodeURIComponent(this.tenant)}/App`,
     };
+    // On native Android/iOS, CapacitorCookieManager automatically attaches the Cookie
+    // header from android.webkit.CookieManager. Setting Cookie manually would cause
+    // HttpURLConnection to emit two separate Cookie headers, breaking ASP.NET SSO.
+    if (!Capacitor.isNativePlatform()) {
+      headers.Cookie = resolveCookieForUrl(this.cookie, url);
+    }
+    return headers;
   }
 
   private isLoginUrl(url: string | undefined): boolean {
@@ -188,6 +211,8 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
 
   /** Performs a request and returns parsed JSON; maps auth failures to `SessionExpiredError`. */
   private async request<T = unknown>(method: HttpMethod, url: string, body?: unknown): Promise<T> {
+    await this.ensureNativeCookiesRestored();
+
     let res: HttpResponse;
     try {
       res = await CapacitorHttp.request({
@@ -201,8 +226,6 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
         responseType: 'json',
         connectTimeout: REQUEST_TIMEOUT_MS,
         readTimeout: REQUEST_TIMEOUT_MS,
-        // Handle redirects manually so a redirect to the login page is detectable.
-        disableRedirects: true,
       });
     } catch (err) {
       throw new VulcanApiError(`Błąd sieci: ${(err as Error)?.message ?? 'brak połączenia'}`, undefined, url);
@@ -210,6 +233,7 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
 
     const { status } = res;
     const location = res.headers?.Location ?? res.headers?.location;
+    const resolvedUrl = res.url ? String(res.url) : '';
 
     if (status === 401 || status === 403) {
       throw new SessionExpiredError(undefined, status);
@@ -218,7 +242,7 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
       if (!location || this.isLoginUrl(location)) throw new SessionExpiredError(undefined, status);
       throw new VulcanApiError(`Nieoczekiwane przekierowanie do ${location}`, status, url);
     }
-    if (this.isLoginUrl(res.url) && !this.isLoginUrl(url)) {
+    if (this.isLoginUrl(resolvedUrl) && !this.isLoginUrl(url)) {
       throw new SessionExpiredError(undefined, status);
     }
     if (status >= 400) {
@@ -255,57 +279,68 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
 
   private async loadContext(force = false): Promise<StudentContext> {
     if (this.context && !force) return this.context;
+    if (this.contextPromise && !force) return this.contextPromise;
 
-    const raw = asObj(await this.request('GET', this.studentUrl(EP.student.context)));
-    const students = asArr(raw.uczniowie ?? raw.Uczniowie ?? raw.students);
-    const student = asObj(students[0] ?? raw);
+    const promise = (async () => {
+      const raw = asObj(await this.request('GET', this.studentUrl(EP.student.context)));
+      const students = asArr(raw.uczniowie ?? raw.Uczniowie ?? raw.students);
+      const student = asObj(students[0] ?? raw);
 
-    const studentKey = str(student, 'key', 'klucz', 'Key');
-    if (!studentKey) throw new VulcanApiError('Nie znaleziono klucza ucznia w /api/Context.');
+      const studentKey = str(student, 'key', 'klucz', 'Key');
+      if (!studentKey) throw new VulcanApiError('Nie znaleziono klucza ucznia w /api/Context.');
 
-    const diaryId = num(student, NaN, 'idDziennik', 'IdDziennik');
-    const mailboxGlobalKey = str(student, 'globalKeySkrzynka', 'GlobalKeySkrzynka') || undefined;
+      const diaryId = num(student, NaN, 'idDziennik', 'IdDziennik');
+      const mailboxGlobalKey = str(student, 'globalKeySkrzynka', 'GlobalKeySkrzynka') || undefined;
 
-    // Fetch classification periods from `/api/OkresyKlasyfikacyjne?key=...&idDziennik=...`
-    let periodId: number | string | undefined;
-    try {
-      const periodsRaw = await this.request(
-        'GET',
-        this.studentUrl(EP.student.periods, {
-          key: studentKey,
-          idDziennik: Number.isFinite(diaryId) ? diaryId : undefined,
-        }),
-      );
-      const periods = asArr(periodsRaw).map(asObj);
-      const now = Date.now();
-      const current =
-        periods.find((p) => {
-          const from = Date.parse(str(p, 'dataOd', 'from'));
-          const to = Date.parse(str(p, 'dataDo', 'to'));
-          return from <= now && now <= to;
-        }) ?? periods[periods.length - 1];
+      // Fetch classification periods from `/api/OkresyKlasyfikacyjne?key=...&idDziennik=...`
+      let periodId: number | string | undefined;
+      try {
+        const periodsRaw = await this.request(
+          'GET',
+          this.studentUrl(EP.student.periods, {
+            key: studentKey,
+            idDziennik: Number.isFinite(diaryId) ? diaryId : undefined,
+          }),
+        );
+        const periods = asArr(periodsRaw).map(asObj);
+        const now = Date.now();
+        const current =
+          periods.find((p) => {
+            const from = Date.parse(str(p, 'dataOd', 'from'));
+            const to = Date.parse(str(p, 'dataDo', 'to'));
+            return from <= now && now <= to;
+          }) ?? periods[periods.length - 1];
 
-      if (current) {
-        const numericId = num(current, NaN, 'id', 'Id');
-        periodId = Number.isFinite(numericId) ? numericId : str(current, 'id', 'Id');
+        if (current) {
+          const numericId = num(current, NaN, 'id', 'Id');
+          periodId = Number.isFinite(numericId) ? numericId : str(current, 'id', 'Id');
+        }
+      } catch (err) {
+        if (err instanceof SessionExpiredError) throw err;
+        console.warn('[LiveVulcanProvider] Could not fetch OkresyKlasyfikacyjne', err);
       }
-    } catch (err) {
-      if (err instanceof SessionExpiredError) throw err;
-      console.warn('[LiveVulcanProvider] Could not fetch OkresyKlasyfikacyjne', err);
-    }
 
-    const oddzial = str(student, 'oddzial', 'Oddzial');
-    const jednostka = str(student, 'jednostka', 'nazwaJednostki', 'szkola', 'school') || this.tenant;
+      const oddzial = str(student, 'oddzial', 'Oddzial');
+      const jednostka = str(student, 'jednostka', 'nazwaJednostki', 'szkola', 'school') || this.tenant;
 
-    this.context = {
-      studentKey,
-      diaryId: Number.isFinite(diaryId) ? diaryId : undefined,
-      periodId,
-      mailboxGlobalKey,
-      userName: str(student, 'uczen', 'imieNazwisko', 'nazwa', 'name') || 'Uczeń',
-      schoolName: oddzial ? `${jednostka} (${oddzial})` : jednostka,
-    };
-    return this.context;
+      const resolved: StudentContext = {
+        studentKey,
+        diaryId: Number.isFinite(diaryId) ? diaryId : undefined,
+        periodId,
+        mailboxGlobalKey,
+        userName: str(student, 'uczen', 'imieNazwisko', 'nazwa', 'name') || 'Uczeń',
+        schoolName: oddzial ? `${jednostka} (${oddzial})` : jednostka,
+      };
+      this.context = resolved;
+      return resolved;
+    })().finally(() => {
+      if (this.contextPromise === promise) {
+        this.contextPromise = undefined;
+      }
+    });
+
+    this.contextPromise = promise;
+    return promise;
   }
 
   async verifySession(): Promise<SessionInfo> {
@@ -566,22 +601,33 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
     to.setDate(from.getDate() + 13);
     to.setHours(23, 59, 59, 999);
 
-    let raw: unknown;
+    let raw: unknown = [];
     try {
-      raw = await this.request(
-        'GET',
-        this.studentUrl(EP.student.exams, {
-          key: ctx.studentKey,
-          dataOd: from.toISOString(),
-          dataDo: to.toISOString(),
-        }),
-      );
-    } catch (err) {
-      if (err instanceof SessionExpiredError) throw err;
       raw = await this.request(
         'GET',
         this.studentUrl(EP.student.examsDashboard, { key: ctx.studentKey }),
       );
+    } catch {
+      raw = [];
+    }
+
+    const hasDashboardItems = Array.isArray(raw)
+      ? raw.length > 0
+      : asArr(asObj(raw).sprawdziany ?? asObj(raw).items ?? asObj(raw).data).length > 0;
+
+    if (!hasDashboardItems) {
+      try {
+        raw = await this.request(
+          'GET',
+          this.studentUrl(EP.student.exams, {
+            key: ctx.studentKey,
+            dataOd: from.toISOString(),
+            dataDo: to.toISOString(),
+          }),
+        );
+      } catch {
+        // Optional endpoint: do not invalidate session if unavailable
+      }
     }
 
     const root = asObj(raw);
@@ -682,8 +728,7 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
       }
 
       return { isOnDutyThisWeek: false };
-    } catch (err) {
-      if (err instanceof SessionExpiredError) throw err;
+    } catch {
       return { isOnDutyThisWeek: false };
     }
   }

@@ -98,9 +98,9 @@ export const EDUVULCAN_ENDPOINTS = {
 /** Default page size for message lists. */
 export const MESSAGES_PAGE_SIZE = 50;
 
-/** Desktop browser User-Agent – the web endpoints expect a real browser. */
+/** Mobile browser User-Agent matching the WebView login client. */
 export const BROWSER_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
 
 /** Request timeout in milliseconds. */
 export const REQUEST_TIMEOUT_MS = 20_000;

@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from 'react';
 import { isSessionExpiredError } from '@/api/errors';
-import { LiveVulcanProvider } from '@/api/LiveVulcanProvider';
 import { clearAllData, db, markMessageReadLocally, saveMessageContent } from '@/db/database';
 import { DEFAULT_SESSION, type AppMode, type AuthSession, type Grade, type Message } from '@/models/types';
 import { NotificationService } from '@/services/notification.service';
@@ -106,6 +105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (settingsRef.current.notificationsEnabled) await NotificationService.notifySessionExpired();
         }
         resetProviderCache();
+        void VulcanAuth.clearWebViewCookies().catch(() => undefined);
         await persistSession({ ...sessionRef.current, isAuthenticated: false });
       } else {
         setLastError(errorMessage(err));
@@ -235,21 +235,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loginLive = useCallback(
     async ({ sessionCookie, tenant }: LiveCredentials) => {
-      // Validate first – throws on invalid cookie/tenant (caller shows the error).
-      const info = await new LiveVulcanProvider({ sessionCookie, tenant }).verifySession();
-
-      const prev = sessionRef.current;
-      const sameAccount = prev.mode === 'live' && prev.tenant === tenant.trim() && prev.userName === info.userName;
-      if (!sameAccount) await resetLocalState();
-
       resetProviderCache();
-      setSessionExpired(false);
-      await persistSession({
+      const candidateSession: AuthSession = {
         ...DEFAULT_SESSION,
         isAuthenticated: true,
         mode: 'live',
         sessionCookie: sessionCookie.trim(),
         tenant: tenant.trim(),
+      };
+      // Validate using the cached provider so context & restored cookies are reused on syncNow.
+      const info = await getProvider(candidateSession).verifySession();
+
+      const prev = sessionRef.current;
+      const sameAccount = prev.mode === 'live' && prev.tenant === tenant.trim() && prev.userName === info.userName;
+      if (!sameAccount) await resetLocalState();
+
+      setSessionExpired(false);
+      await persistSession({
+        ...candidateSession,
         userName: info.userName,
         schoolName: info.schoolName,
         lastSync: sameAccount ? prev.lastSync : null,

@@ -1,7 +1,6 @@
 import type { IVulcanDataProvider } from '@/api/IVulcanProvider';
 import { LiveVulcanProvider } from '@/api/LiveVulcanProvider';
 import { MockVulcanProvider } from '@/api/MockVulcanProvider';
-import { isSessionExpiredError } from '@/api/errors';
 import {
   META_KEYS,
   getStoredGradeIds,
@@ -85,14 +84,29 @@ export function isSyncInProgress(): boolean {
 }
 
 async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOptions): Promise<SyncResult> {
-  // 1. Fetch (messages + grades are required; timetable, exams and duties are best-effort).
-  const [messages, grades, timetableResult, examsResult, dutyResult] = await Promise.all([
-    provider.fetchMessages(),
-    provider.fetchGrades(),
+  // 0. Authoritative session check (only this step invalidates the session if expired).
+  await provider.verifySession();
+
+  // 1. Fetch all modules independently so a partial/secondary endpoint failure
+  // never wipes valid offline data or logs the user out.
+  const [messagesResult, gradesResult, timetableResult, examsResult, dutyResult] = await Promise.all([
+    provider.fetchMessages().then(
+      (messages) => ({ ok: true as const, messages }),
+      (error: unknown) => {
+        console.warn('[sync] Messages fetch failed, keeping offline copy', error);
+        return { ok: false as const };
+      },
+    ),
+    provider.fetchGrades().then(
+      (grades) => ({ ok: true as const, grades }),
+      (error: unknown) => {
+        console.warn('[sync] Grades fetch failed, keeping offline copy', error);
+        return { ok: false as const };
+      },
+    ),
     provider.fetchTimetable().then(
       (lessons) => ({ ok: true as const, lessons }),
       (error: unknown) => {
-        if (isSessionExpiredError(error)) throw error;
         console.warn('[sync] Timetable fetch failed, keeping offline copy', error);
         return { ok: false as const };
       },
@@ -100,7 +114,6 @@ async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOpt
     provider.fetchExams().then(
       (exams) => ({ ok: true as const, exams }),
       (error: unknown) => {
-        if (isSessionExpiredError(error)) throw error;
         console.warn('[sync] Exams fetch failed, keeping offline copy', error);
         return { ok: false as const };
       },
@@ -108,12 +121,14 @@ async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOpt
     provider.fetchDutyStatus().then(
       (duty) => ({ ok: true as const, duty }),
       (error: unknown) => {
-        if (isSessionExpiredError(error)) throw error;
         console.warn('[sync] Duty fetch failed, keeping offline copy', error);
         return { ok: false as const };
       },
     ),
   ]);
+
+  const messages = messagesResult.ok ? messagesResult.messages : [];
+  const grades = gradesResult.ok ? gradesResult.grades : [];
 
   // 2. Diff against the local DB.
   const [knownMessageIds, knownGradeIds, initialDone] = await Promise.all([
@@ -129,8 +144,8 @@ async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOpt
   const newGrades = initialSync ? [] : grades.filter((g) => !knownGradeIds.has(g.id));
 
   // 3. Persist (offline source of truth).
-  await saveMessages(messages);
-  await replaceGrades(grades);
+  if (messagesResult.ok) await saveMessages(messages);
+  if (gradesResult.ok) await replaceGrades(grades);
   if (timetableResult.ok) await replaceLessons(timetableResult.lessons);
   if (examsResult.ok) await replaceExams(examsResult.exams);
   if (dutyResult.ok) await saveDutyInfo(dutyResult.duty);

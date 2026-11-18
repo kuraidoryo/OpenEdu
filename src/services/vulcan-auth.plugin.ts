@@ -23,6 +23,13 @@ export interface VulcanAuthPlugin {
    */
   loginWithWebView(): Promise<VulcanWebLoginResult>;
 
+  /** Restores stored domain cookies into Android's native WebView CookieManager. */
+  restoreCookies(options: {
+    uczenCookie: string;
+    wiadomosciCookie?: string;
+    tenant?: string;
+  }): Promise<void>;
+
   /** Clears all WebView cookies (used on logout). */
   clearWebViewCookies(): Promise<void>;
 }
@@ -32,8 +39,11 @@ export const VulcanAuth = registerPlugin<VulcanAuthPlugin>('VulcanAuth', {
     async loginWithWebView(): Promise<VulcanWebLoginResult> {
       window.open('https://eduvulcan.pl/logowanie', '_blank', 'noopener,noreferrer');
       throw new Error(
-        'Automatyczne przechwytywanie ciasteczek HttpOnly działa w natywnej aplikacji Android. W przeglądarce na PC użyj pola „Szybki import (Wklej link / cURL)” poniżej.',
+        'Logowanie przez WebView działa bezpośrednio w aplikacji na Androidzie.',
       );
+    },
+    async restoreCookies(): Promise<void> {
+      // No-op in web browser
     },
     async clearWebViewCookies(): Promise<void> {
       // No-op in web browser
@@ -64,27 +74,36 @@ export function packDomainCookies(uczenCookie: string, wiadomosciCookie?: string
 }
 
 /**
+ * Unpacks domain-tagged cookies into separate `uczenCookie` and `wiadomosciCookie` strings.
+ */
+export function unpackDomainCookies(packedOrRawCookie: string): {
+  uczenCookie: string;
+  wiadomosciCookie: string;
+} {
+  const raw = packedOrRawCookie.trim();
+  if (!raw.includes(DOMAIN_SEP)) {
+    return { uczenCookie: raw, wiadomosciCookie: raw };
+  }
+
+  let uczenCookie = '';
+  let wiadomosciCookie = '';
+  for (const part of raw.split(DOMAIN_SEP)) {
+    if (part.startsWith(UCZEN_PREFIX)) uczenCookie = part.slice(UCZEN_PREFIX.length).trim();
+    if (part.startsWith(WIAD_PREFIX)) wiadomosciCookie = part.slice(WIAD_PREFIX.length).trim();
+  }
+  return {
+    uczenCookie: uczenCookie || wiadomosciCookie,
+    wiadomosciCookie: wiadomosciCookie || uczenCookie,
+  };
+}
+
+/**
  * Resolves the appropriate `Cookie` header for a target URL (`uczen` vs `wiadomosci`).
  */
 export function resolveCookieForUrl(packedOrRawCookie: string, url: string): string {
-  const raw = packedOrRawCookie.trim();
-  if (!raw.includes(DOMAIN_SEP)) {
-    return raw;
-  }
-
-  let uczen = '';
-  let wiad = '';
-  for (const part of raw.split(DOMAIN_SEP)) {
-    if (part.startsWith(UCZEN_PREFIX)) uczen = part.slice(UCZEN_PREFIX.length).trim();
-    if (part.startsWith(WIAD_PREFIX)) wiad = part.slice(WIAD_PREFIX.length).trim();
-  }
-
+  const { uczenCookie, wiadomosciCookie } = unpackDomainCookies(packedOrRawCookie);
   const isMessagesHost = url.includes('wiadomosci.eduvulcan.pl');
-  if (isMessagesHost) {
-    // Include wiadomosci cookies first, plus Eduvulcan.Uczen.Sso if present
-    return wiad || uczen;
-  }
-  return uczen || wiad;
+  return isMessagesHost ? wiadomosciCookie : uczenCookie;
 }
 
 // ───────────────────── Smart Input Parser (Rozwiązanie 3) ─────────────────────
