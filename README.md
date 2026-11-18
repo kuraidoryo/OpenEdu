@@ -113,10 +113,14 @@ src/
 
 ---
 
-## 🚀 Getting started
+## 🚀 Development & Building APK
 
-> Detailed build instructions (including generating the Android APK) will be added as the project
-> progresses.
+### Prerequisites
+
+- **Node.js** 18+ and **npm**
+- *(For Android APK builds)* **Android Studio** (with Android SDK & JDK 17+)
+
+### 1. Run in the browser (Demo / Development mode)
 
 ```bash
 git clone https://github.com/<your-username>/OpenEdu.git
@@ -124,6 +128,42 @@ cd OpenEdu
 npm install
 npm run dev
 ```
+
+Open `http://localhost:5173` in your browser. The app starts in **Demo (Mock) mode** by default,
+allowing you to test offline messages, notifications (`Diff & Notify`), the timetable and the
+weighted grade average simulator right away.
+
+### 2. Build the production web bundle
+
+```bash
+npm run build
+```
+
+This runs `tsc -b && vite build` and outputs static assets into the `dist/` directory.
+
+### 3. Generate the Android project & build an APK
+
+1. **Build the web assets and add the native Android project** *(first time only)*:
+   ```bash
+   npm run build
+   npx cap add android
+   ```
+2. **Sync web assets and Capacitor plugins (`CapacitorHttp`, `LocalNotifications`, `Preferences`)**
+   after any code changes:
+   ```bash
+   npm run cap:sync
+   ```
+3. **Open the Android project in Android Studio**:
+   ```bash
+   npm run cap:android
+   ```
+4. In Android Studio, wait for Gradle sync to finish, then select **Build → Build Bundle(s) / APK(s) → Build APK(s)** (or press **Run ▶** to install directly on a connected phone / emulator).
+
+> 🇵🇱 **Sklep i budowanie APK (skrót po polsku):**
+> 1. Uruchomienie w przeglądarce: `npm install && npm run dev`
+> 2. Wygenerowanie projektu Androida (jednorazowo): `npm run build && npx cap add android`
+> 3. Synchronizacja zmian webowych z natywnym projektem: `npm run cap:sync`
+> 4. Otwarcie w Android Studio i budowa pliku `.apk`: `npm run cap:android` (następnie *Build → Build APK(s)*).
 
 ---
 

@@ -9,9 +9,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:android": "npx cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.10",
     "@capacitor/core": "^7.6.10",
     "@capacitor/local-notifications": "^7.0.7",
     "@capacitor/preferences": "^7.0.4",
