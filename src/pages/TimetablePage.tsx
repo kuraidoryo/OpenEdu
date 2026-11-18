@@ -444,6 +444,27 @@ export function TimetablePage() {
     );
   }, [selectedWeekLesson, examsByDayAndSubject]);
 
+  // Unique sorted time slots (rows) across Mon–Fri for the tabular week view
+  const weekTimeSlots = useMemo(() => {
+    const slotMap = new Map<string, { startTime: string; endTime: string }>();
+    for (const lesson of activeLessons) {
+      if (lesson.dayOfWeek < 1 || lesson.dayOfWeek > 5 || !lesson.startTime) continue;
+      if (!slotMap.has(lesson.startTime)) {
+        slotMap.set(lesson.startTime, {
+          startTime: lesson.startTime,
+          endTime: lesson.endTime,
+        });
+      }
+    }
+    return Array.from(slotMap.values())
+      .sort((a, b) => a.startTime.localeCompare(b.startTime))
+      .map((slot, index) => ({
+        slotIndex: index + 1,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+      }));
+  }, [activeLessons]);
+
   return (
     <div className="flex flex-col gap-3.5 p-3.5">
       {/* ───────────── Week Switcher Header (Previous / Next Week) ───────────── */}
@@ -715,47 +736,101 @@ export function TimetablePage() {
             );
           })()}
 
-          {/* 5 Columns Side-by-Side (Pon - Pt) */}
-          <div className="grid grid-cols-5 items-start gap-1.5">
-            {WEEKDAYS.map(({ day, short }) => {
-              const list = lessonsByDay.get(day) ?? [];
-              const hasChange = daysWithChanges.has(day);
-              const hasExam = daysWithExams.has(day);
+          {/* Classic Timetable Grid Table (Hours on Left + 5 Equal Day Columns) */}
+          {!isLoadingWeek && weekTimeSlots.length === 0 ? (
+            <div className="my-6 flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white/50 p-8 text-center dark:border-slate-800 dark:bg-slate-900/40">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800">
+                <CalendarDays size={24} />
+              </div>
+              <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-slate-300">
+                Brak lekcji w tym tygodniu
+              </p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Plan lekcji jest przechowywany lokalnie i dostępny również bez internetu.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <table className="w-full table-fixed border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/90 dark:border-slate-800 dark:bg-slate-800/70">
+                    <th className="w-[58px] border-r border-slate-200 px-1 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                      Godz.
+                    </th>
+                    {WEEKDAYS.map(({ day, short }) => {
+                      const hasChange = daysWithChanges.has(day);
+                      const hasExam = daysWithExams.has(day);
+                      return (
+                        <th
+                          key={day}
+                          className="relative border-r border-slate-200 px-0.5 py-1.5 text-center last:border-r-0 dark:border-slate-800"
+                        >
+                          <p className="text-[11px] font-extrabold text-slate-900 dark:text-white">
+                            {short}
+                          </p>
+                          <p className="text-[9px] font-medium text-slate-500 dark:text-slate-400">
+                            {weekMeta.dayDates[day]}
+                          </p>
+                          {(hasChange || hasExam) && (
+                            <span className="absolute right-1 top-1 flex items-center gap-0.5">
+                              {hasExam && (
+                                <span
+                                  title="Sprawdzian lub kartkówka w tym dniu"
+                                  className="h-1.5 w-1.5 rounded-full bg-fuchsia-500"
+                                />
+                              )}
+                              {hasChange && (
+                                <span
+                                  title="Zmiana w planie lekcji"
+                                  className="h-1.5 w-1.5 rounded-full bg-amber-500"
+                                />
+                              )}
+                            </span>
+                          )}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
 
-              return (
-                <section key={day} className="flex min-w-0 flex-col gap-1.5">
-                  {/* Column Day Header */}
-                  <div className="relative rounded-xl border border-slate-200/80 bg-white px-1 py-2 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                    <p className="text-xs font-extrabold text-slate-900 dark:text-white">{short}</p>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                      {weekMeta.dayDates[day]}
-                    </p>
-                    {(hasChange || hasExam) && (
-                      <span className="absolute right-1 top-1 flex items-center gap-0.5">
-                        {hasExam && (
-                          <span
-                            title="Sprawdzian lub kartkówka w tym dniu"
-                            className="h-1.5 w-1.5 rounded-full bg-fuchsia-500"
-                          />
-                        )}
-                        {hasChange && (
-                          <span
-                            title="Zmiana w planie lekcji"
-                            className="h-1.5 w-1.5 rounded-full bg-amber-500"
-                          />
-                        )}
-                      </span>
-                    )}
-                  </div>
+                <tbody>
+                  {weekTimeSlots.map((slot) => (
+                    <tr
+                      key={slot.startTime}
+                      className="border-b border-slate-200/80 last:border-b-0 dark:border-slate-800/80"
+                    >
+                      {/* Time Interval Column on the Left */}
+                      <td className="h-[68px] border-r border-slate-200 bg-slate-50/60 px-1 py-1 text-center align-middle dark:border-slate-800 dark:bg-slate-800/30">
+                        <div className="flex flex-col items-center justify-center leading-tight">
+                          <span className="text-[9px] font-extrabold text-brand-600 dark:text-brand-400">
+                            #{slot.slotIndex}
+                          </span>
+                          <span className="mt-0.5 text-[9px] font-bold text-slate-700 dark:text-slate-200">
+                            {slot.startTime}
+                          </span>
+                          <span className="text-[8px] text-slate-400 dark:text-slate-500">
+                            {slot.endTime}
+                          </span>
+                        </div>
+                      </td>
 
-                  {/* Column Lessons */}
-                  {list.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-200 bg-white/40 px-1 py-4 text-center text-[10px] text-slate-400 dark:border-slate-800 dark:bg-slate-900/30">
-                      Brak
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-1.5">
-                      {list.map((lesson) => {
+                      {/* 5 Equal-Width Day Cells */}
+                      {WEEKDAYS.map(({ day }) => {
+                        const lesson = (lessonsByDay.get(day) ?? []).find(
+                          (l) => l.startTime === slot.startTime,
+                        );
+
+                        if (!lesson) {
+                          return (
+                            <td
+                              key={day}
+                              className="h-[68px] border-r border-slate-100 p-0.5 align-top last:border-r-0 dark:border-slate-800/60"
+                            >
+                              <div className="h-full w-full" />
+                            </td>
+                          );
+                        }
+
                         const changeCfg = lesson.changeInfo
                           ? getChangeBadgeConfig(lesson.changeInfo)
                           : null;
@@ -768,66 +843,68 @@ export function TimetablePage() {
                         const isSelected = expandedLessonId === lesson.id;
 
                         return (
-                          <button
-                            key={lesson.id}
-                            type="button"
-                            onClick={() => toggleExpand(lesson.id)}
-                            className={clsx(
-                              'flex w-full min-w-0 flex-col rounded-xl border p-1.5 text-left shadow-sm transition active:scale-[0.98]',
-                              hasExam
-                                ? 'border-fuchsia-300 bg-fuchsia-50/85 dark:border-fuchsia-700 dark:bg-fuchsia-950/50'
-                                : changeCfg
-                                  ? changeCfg.cardClass
-                                  : 'border-slate-200/80 bg-white dark:border-slate-800 dark:bg-slate-900',
-                              isSelected && 'ring-2 ring-brand-600',
-                            )}
+                          <td
+                            key={day}
+                            className="h-[68px] border-r border-slate-100 p-0.5 align-top last:border-r-0 dark:border-slate-800/60"
                           >
-                            <span className="truncate text-[9px] font-semibold text-slate-400 dark:text-slate-500">
-                              #{lesson.lessonNumber} · {lesson.startTime}
-                            </span>
-
-                            <span
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(lesson.id)}
                               className={clsx(
-                                'mt-0.5 line-clamp-2 break-words text-[11px] font-bold leading-tight',
-                                isCancelled
-                                  ? 'text-slate-400 line-through dark:text-slate-500'
-                                  : 'text-slate-900 dark:text-white',
+                                'flex h-full w-full flex-col justify-between overflow-hidden rounded-lg border p-1 text-left transition active:scale-[0.97]',
+                                hasExam
+                                  ? 'border-fuchsia-300 bg-fuchsia-50/90 dark:border-fuchsia-700 dark:bg-fuchsia-950/50'
+                                  : changeCfg
+                                    ? changeCfg.cardClass
+                                    : 'border-slate-200/70 bg-slate-50/70 hover:bg-slate-100/80 dark:border-slate-800 dark:bg-slate-800/50 dark:hover:bg-slate-800',
+                                isSelected && 'ring-2 ring-brand-600',
                               )}
                             >
-                              {lesson.subject}
-                            </span>
-
-                            {lesson.room && (
-                              <span className="mt-1 truncate text-[9px] font-medium text-slate-500 dark:text-slate-400">
-                                s. {lesson.room}
+                              <span
+                                className={clsx(
+                                  'line-clamp-2 break-words text-[10px] font-bold leading-tight',
+                                  isCancelled
+                                    ? 'text-slate-400 line-through dark:text-slate-500'
+                                    : 'text-slate-900 dark:text-white',
+                                )}
+                              >
+                                {lesson.subject}
                               </span>
-                            )}
 
-                            {hasExam ? (
-                              <span className="mt-1 truncate rounded bg-fuchsia-200/80 px-1 py-0.5 text-[9px] font-bold text-fuchsia-900 dark:bg-fuchsia-900/80 dark:text-fuchsia-200">
-                                {matchingExams[0].type}
-                              </span>
-                            ) : (
-                              changeCfg && (
-                                <span
-                                  className={clsx(
-                                    'mt-1 truncate rounded border px-1 py-0.5 text-[9px] font-bold',
-                                    changeCfg.badgeClass,
-                                  )}
-                                >
-                                  {changeCfg.label}
-                                </span>
-                              )
-                            )}
-                          </button>
+                              <div className="mt-0.5 flex flex-col gap-0.5">
+                                {lesson.room && (
+                                  <span className="truncate text-[8px] font-medium text-slate-500 dark:text-slate-400">
+                                    s. {lesson.room}
+                                  </span>
+                                )}
+
+                                {hasExam ? (
+                                  <span className="truncate rounded bg-fuchsia-200/80 px-1 py-0.2 text-[8px] font-bold text-fuchsia-900 dark:bg-fuchsia-900/80 dark:text-fuchsia-200">
+                                    {matchingExams[0].type}
+                                  </span>
+                                ) : (
+                                  changeCfg && (
+                                    <span
+                                      className={clsx(
+                                        'truncate rounded border px-0.5 py-0.2 text-[8px] font-bold',
+                                        changeCfg.badgeClass,
+                                      )}
+                                    >
+                                      {changeCfg.label}
+                                    </span>
+                                  )
+                                )}
+                              </div>
+                            </button>
+                          </td>
                         );
                       })}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
-          </div>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
