@@ -9,6 +9,7 @@ import {
   CalendarDays,
   GraduationCap,
   Home,
+  LayoutGrid,
   Mail,
   RefreshCw,
   Settings,
@@ -104,6 +105,11 @@ export function MobileLayout({ children }: MobileLayoutProps) {
       to: '/grades',
       label: 'Oceny',
       icon: Award,
+    },
+    {
+      to: '/more',
+      label: 'Inne',
+      icon: LayoutGrid,
     },
     {
       to: '/settings',
@@ -273,14 +279,14 @@ export function MobileLayout({ children }: MobileLayoutProps) {
           aria-label="Główna nawigacja"
           className="bottom-nav-safe fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-md border-t border-slate-200/90 bg-white/95 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/95 sm:rounded-b-[2rem]"
         >
-          <div className="grid grid-cols-5 px-1 pt-1.5">
+          <div className="grid grid-cols-6 px-0.5 pt-1.5">
             {navItems.map(({ to, label, icon: Icon, badge, dot }) => (
               <NavLink
                 key={to}
                 to={to}
                 className={({ isActive }) =>
                   clsx(
-                    'group relative flex flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 text-[11px] font-semibold transition',
+                    'group relative flex flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 text-[10px] font-semibold transition',
                     isActive
                       ? 'text-brand-600 dark:text-brand-400'
                       : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
@@ -291,11 +297,11 @@ export function MobileLayout({ children }: MobileLayoutProps) {
                   <>
                     <div
                       className={clsx(
-                        'relative flex h-7 w-12 items-center justify-center rounded-full transition-colors',
+                        'relative flex h-7 w-10 items-center justify-center rounded-full transition-colors',
                         isActive && 'bg-brand-50 dark:bg-brand-950/80',
                       )}
                     >
-                      <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
+                      <Icon size={18} strokeWidth={isActive ? 2.4 : 2} />
                       {badge !== undefined && badge > 0 && (
                         <span className="absolute -right-0.5 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
                           {badge > 99 ? '99+' : badge}

@@ -6,9 +6,13 @@ import {
   getStoredGradeIds,
   getStoredMessageIds,
   isInitialSyncDone,
+  replaceAttendance,
+  replaceDuties,
   replaceExams,
   replaceGrades,
   replaceLessons,
+  replaceMeetings,
+  replaceNotes,
   saveDutyInfo,
   saveMessages,
   setMeta,
@@ -89,7 +93,17 @@ async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOpt
 
   // 1. Fetch all modules independently so a partial/secondary endpoint failure
   // never wipes valid offline data or logs the user out.
-  const [messagesResult, gradesResult, timetableResult, examsResult, dutyResult] = await Promise.all([
+  const [
+    messagesResult,
+    gradesResult,
+    timetableResult,
+    examsResult,
+    dutyResult,
+    attendanceResult,
+    notesResult,
+    meetingsResult,
+    dutiesListResult,
+  ] = await Promise.all([
     provider.fetchMessages().then(
       (messages) => ({ ok: true as const, messages }),
       (error: unknown) => {
@@ -125,6 +139,34 @@ async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOpt
         return { ok: false as const };
       },
     ),
+    provider.fetchAttendance().then(
+      (attendance) => ({ ok: true as const, attendance }),
+      (error: unknown) => {
+        console.warn('[sync] Attendance fetch failed, keeping offline copy', error);
+        return { ok: false as const };
+      },
+    ),
+    provider.fetchNotes().then(
+      (notes) => ({ ok: true as const, notes }),
+      (error: unknown) => {
+        console.warn('[sync] Notes fetch failed, keeping offline copy', error);
+        return { ok: false as const };
+      },
+    ),
+    provider.fetchMeetings().then(
+      (meetings) => ({ ok: true as const, meetings }),
+      (error: unknown) => {
+        console.warn('[sync] Meetings fetch failed, keeping offline copy', error);
+        return { ok: false as const };
+      },
+    ),
+    provider.fetchDuties().then(
+      (duties) => ({ ok: true as const, duties }),
+      (error: unknown) => {
+        console.warn('[sync] Duties list fetch failed, keeping offline copy', error);
+        return { ok: false as const };
+      },
+    ),
   ]);
 
   const messages = messagesResult.ok ? messagesResult.messages : [];
@@ -149,6 +191,10 @@ async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOpt
   if (timetableResult.ok) await replaceLessons(timetableResult.lessons);
   if (examsResult.ok) await replaceExams(examsResult.exams);
   if (dutyResult.ok) await saveDutyInfo(dutyResult.duty);
+  if (attendanceResult.ok) await replaceAttendance(attendanceResult.attendance);
+  if (notesResult.ok) await replaceNotes(notesResult.notes);
+  if (meetingsResult.ok) await replaceMeetings(meetingsResult.meetings);
+  if (dutiesListResult.ok) await replaceDuties(dutiesListResult.duties);
 
   const syncedAt = new Date().toISOString();
   await setMeta(META_KEYS.lastSync, syncedAt);

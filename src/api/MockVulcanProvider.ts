@@ -1,4 +1,17 @@
-import type { DayOfWeek, DutyInfo, Exam, Grade, Lesson, Message, MessageFolder } from '@/models/types';
+import type {
+  AttendanceCategory,
+  AttendanceEntry,
+  DayOfWeek,
+  DutyEntry,
+  DutyInfo,
+  Exam,
+  Grade,
+  Lesson,
+  MeetingEntry,
+  Message,
+  MessageFolder,
+  NoteEntry,
+} from '@/models/types';
 import type { IVulcanDataProvider, SessionInfo } from './IVulcanProvider';
 
 // ───────────────────────────── Helpers ─────────────────────────────
@@ -422,6 +435,118 @@ export class MockVulcanProvider implements IVulcanDataProvider {
       isOnDutyThisWeek: true,
       details: 'Masz dyżur klasowy w tym tygodniu (Poniedziałek – Piątek)',
     };
+  }
+
+  async fetchAttendance(_weekDate?: Date): Promise<AttendanceEntry[]> {
+    await latency();
+    return this.lessons.map((l): AttendanceEntry => {
+      let category: AttendanceCategory = 'present';
+      let categoryName = 'Obecność';
+
+      if (l.changeInfo?.type === 'cancelled') {
+        category = 'exempt';
+        categoryName = 'Zwolnienie';
+      } else if (l.dayOfWeek === 1 && l.lessonNumber === 1) {
+        category = 'late';
+        categoryName = 'Spóźnienie';
+      } else if (l.dayOfWeek === 2 && l.lessonNumber >= 6) {
+        category = 'excused';
+        categoryName = 'Nieobecność usprawiedliwiona';
+      } else if (l.dayOfWeek === 3 && l.lessonNumber === 7) {
+        category = 'absent';
+        categoryName = 'Nieobecność nieusprawiedliwiona';
+      }
+
+      return {
+        id: `mock-att-${l.dayOfWeek}-${l.lessonNumber}`,
+        date: dateForWeekday(l.dayOfWeek, false),
+        dayOfWeek: l.dayOfWeek,
+        lessonNumber: l.lessonNumber,
+        startTime: l.startTime,
+        endTime: l.endTime,
+        subject: l.subject,
+        category,
+        categoryName,
+        teacher: l.teacher,
+      };
+    });
+  }
+
+  async fetchNotes(): Promise<NoteEntry[]> {
+    await latency();
+    return [
+      {
+        id: 'mock-note-1',
+        date: daysAgo(4, 13, 20),
+        teacher: TEACHERS.biologia,
+        category: 'Pochwała',
+        content: 'Wzorowe przygotowanie prezentacji i pomoc w organizacji szkolnego dnia ekologii.',
+        kind: 'praise',
+        points: '+15',
+      },
+      {
+        id: 'mock-note-2',
+        date: daysAgo(11, 10, 45),
+        teacher: TEACHERS.matematyka,
+        category: 'Uwaga',
+        content: 'Rozmowy podczas sprawdzianu i brak zadania domowego.',
+        kind: 'remark',
+        points: '-5',
+      },
+      {
+        id: 'mock-note-3',
+        date: daysAgo(18, 12, 10),
+        teacher: TEACHERS.wychowawca,
+        category: 'Pochwała',
+        content: 'Zaangażowanie w przygotowanie uroczystości szkolnej.',
+        kind: 'praise',
+        points: '+10',
+      },
+    ];
+  }
+
+  async fetchMeetings(): Promise<MeetingEntry[]> {
+    await latency();
+    return [
+      {
+        id: 'mock-meeting-1',
+        date: dateForWeekday(2, true).replace('T12:00:00', 'T17:30:00'),
+        title: 'Zebranie z rodzicami – podsumowanie semestru',
+        roomOrPlace: 'Sala 24',
+        teacher: TEACHERS.wychowawca,
+        agenda: 'Omówienie postępów w nauce, frekwencji oraz planów wycieczki klasowej.',
+      },
+      {
+        id: 'mock-meeting-2',
+        date: daysAgo(35, 17, 0),
+        title: 'Wywiadówka śródokresowa',
+        roomOrPlace: 'Sala 24',
+        teacher: TEACHERS.wychowawca,
+        agenda: 'Informacja o ocenach przewidywanych i zasadach klasyfikacji.',
+      },
+    ];
+  }
+
+  async fetchDuties(_weekDate?: Date): Promise<DutyEntry[]> {
+    await latency();
+    return [
+      {
+        id: 'mock-duty-1',
+        dateFrom: dateForWeekday(1, false),
+        dateTo: dateForWeekday(5, false),
+        studentName: `${MOCK_STUDENT.userName} (Ty)`,
+        isCurrentUser: true,
+        note: 'Bieżący tydzień',
+      },
+      {
+        id: 'mock-duty-2',
+        dateFrom: dateForWeekday(1, false),
+        dateTo: dateForWeekday(5, false),
+        studentName: 'Anna Nowak',
+        isCurrentUser: false,
+        note: 'Bieżący tydzień',
+      },
+    ];
   }
 
   async verifySession(): Promise<SessionInfo> {

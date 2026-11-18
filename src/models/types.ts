@@ -145,3 +145,66 @@ export interface DutyInfo {
   isOnDutyThisWeek: boolean;
   details?: string;
 }
+
+/** Attendance category for a single lesson slot. */
+export type AttendanceCategory =
+  | 'present'
+  | 'absent'
+  | 'excused'
+  | 'late'
+  | 'late-excused'
+  | 'exempt';
+
+/** Attendance record for a single lesson. */
+export interface AttendanceEntry {
+  id: string;
+  /** ISO 8601 date string */
+  date: string;
+  dayOfWeek: DayOfWeek;
+  lessonNumber: number;
+  /** "HH:mm" */
+  startTime: string;
+  /** "HH:mm" */
+  endTime: string;
+  subject: string;
+  category: AttendanceCategory;
+  categoryName: string;
+  teacher?: string;
+}
+
+export type NoteKind = 'praise' | 'remark' | 'neutral';
+
+/** Teacher's praise, remark or behavioral note. */
+export interface NoteEntry {
+  id: string;
+  /** ISO 8601 date string */
+  date: string;
+  teacher: string;
+  category: string;
+  content: string;
+  kind: NoteKind;
+  points?: string | number;
+}
+
+/** Parent-teacher meeting entry. */
+export interface MeetingEntry {
+  id: string;
+  /** ISO 8601 date-time string */
+  date: string;
+  title: string;
+  roomOrPlace?: string;
+  teacher?: string;
+  agenda?: string;
+}
+
+/** Classroom duty roster entry. */
+export interface DutyEntry {
+  id: string;
+  /** ISO 8601 date string */
+  dateFrom: string;
+  /** ISO 8601 date string */
+  dateTo: string;
+  studentName: string;
+  isCurrentUser?: boolean;
+  note?: string;
+}

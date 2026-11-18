@@ -49,6 +49,16 @@ export const EDUVULCAN_ENDPOINTS = {
     examsDashboard: '/api/SprawdzianyTablica',
     /** Classroom duty roster (`key`, `dataOd`, `dataDo`). */
     duties: '/api/Dyzurni',
+    /** Attendance list (`key`, `dataOd`, `dataDo`). */
+    attendance: '/api/Frekwencja',
+    /** Attendance dashboard summary (`key`). */
+    attendanceDashboard: '/api/FrekwencjaTablica',
+    /** Notes / praises / remarks (`key`, `idOkresKlasyfikacyjny`). */
+    notes: '/api/Uwagi',
+    /** Alternative notes endpoint (`key`). */
+    notesAlt: '/api/UwagiOsiagniecia',
+    /** Parent-teacher meetings (`key`). */
+    meetings: '/api/Zebrania',
     /** Quick unread messages counter on the student portal. */
     unreadCount: '/api/WiadomosciNieodczytane',
   },

@@ -8,12 +8,10 @@ import {
   CalendarDays,
   ChevronRight,
   Clock,
-  ShieldAlert,
-  ShieldCheck,
   User,
 } from 'lucide-react';
-import { db, getDutyInfo } from '@/db/database';
-import type { DayOfWeek, DutyInfo, Exam, Grade, Lesson } from '@/models/types';
+import { db } from '@/db/database';
+import type { DayOfWeek, Exam, Grade, Lesson } from '@/models/types';
 import { parseGradeNumericValue } from '@/pages/GradesPage';
 
 const DAY_NAMES: Record<DayOfWeek, string> = {
@@ -128,11 +126,6 @@ export function HomePage() {
   const lessons = useLiveQuery(() => db.lessons.toArray(), [], [] as Lesson[]);
   const grades = useLiveQuery(() => db.grades.toArray(), [], [] as Grade[]);
   const exams = useLiveQuery(() => db.exams.toArray(), [], [] as Exam[]);
-  const dutyInfo = useLiveQuery(
-    () => getDutyInfo(),
-    [],
-    { isOnDutyThisWeek: false } as DutyInfo,
-  );
 
   // 1. Next Lesson
   const nextLesson = useMemo(() => findNextLesson(lessons, new Date()), [lessons]);
@@ -195,52 +188,7 @@ export function HomePage() {
         )}
       </section>
 
-      {/* ───────────── 2. Classroom Duty Status Card ───────────── */}
-      <section
-        className={clsx(
-          'rounded-2xl border p-4 shadow-sm',
-          dutyInfo.isOnDutyThisWeek
-            ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/70 dark:bg-emerald-950/30'
-            : 'border-slate-200/80 bg-white dark:border-slate-800 dark:bg-slate-900',
-        )}
-      >
-        <div className="flex items-start gap-3">
-          <div
-            className={clsx(
-              'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-              dutyInfo.isOnDutyThisWeek
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
-            )}
-          >
-            {dutyInfo.isOnDutyThisWeek ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Dyżur klasowy w tym tygodniu
-            </p>
-            <h2
-              className={clsx(
-                'mt-0.5 text-sm font-bold',
-                dutyInfo.isOnDutyThisWeek
-                  ? 'text-emerald-900 dark:text-emerald-200'
-                  : 'text-slate-900 dark:text-white',
-              )}
-            >
-              {dutyInfo.isOnDutyThisWeek
-                ? 'Tak – jesteś dyżurnym w tym tygodniu'
-                : 'Nie – w tym tygodniu nie masz dyżuru'}
-            </h2>
-            {dutyInfo.details && (
-              <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
-                {dutyInfo.details}
-              </p>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* ───────────── 3. Latest 3 Grades Card ───────────── */}
+      {/* ───────────── 2. Latest 3 Grades Card ───────────── */}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">

@@ -1,5 +1,16 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { DutyInfo, Exam, Grade, Lesson, Message, MessageFolder } from '@/models/types';
+import type {
+  AttendanceEntry,
+  DutyEntry,
+  DutyInfo,
+  Exam,
+  Grade,
+  Lesson,
+  MeetingEntry,
+  Message,
+  MessageFolder,
+  NoteEntry,
+} from '@/models/types';
 
 /** Generic key/value record for small app metadata (e.g. last sync time). */
 export interface MetaEntry {
@@ -19,6 +30,10 @@ export class OpenEduDB extends Dexie {
   grades!: EntityTable<Grade, 'id'>;
   lessons!: EntityTable<Lesson, 'id'>;
   exams!: EntityTable<Exam, 'id'>;
+  attendance!: EntityTable<AttendanceEntry, 'id'>;
+  notes!: EntityTable<NoteEntry, 'id'>;
+  meetings!: EntityTable<MeetingEntry, 'id'>;
+  duties!: EntityTable<DutyEntry, 'id'>;
   meta!: EntityTable<MetaEntry, 'key'>;
 
   constructor() {
@@ -37,6 +52,18 @@ export class OpenEduDB extends Dexie {
       grades: 'id, subject, date, category',
       lessons: 'id, dayOfWeek, [dayOfWeek+lessonNumber]',
       exams: 'id, subject, date, dayOfWeek',
+      meta: 'key',
+    });
+
+    this.version(3).stores({
+      messages: 'id, folder, isRead, dateSent, sender, [folder+dateSent]',
+      grades: 'id, subject, date, category',
+      lessons: 'id, dayOfWeek, [dayOfWeek+lessonNumber]',
+      exams: 'id, subject, date, dayOfWeek',
+      attendance: 'id, date, dayOfWeek',
+      notes: 'id, date, kind',
+      meetings: 'id, date',
+      duties: 'id, dateFrom',
       meta: 'key',
     });
   }
@@ -150,6 +177,36 @@ export async function replaceExams(exams: Exam[]): Promise<void> {
   });
 }
 
+// ───────────────────────────── More (Attendance / Notes / Meetings / Duties) ─────────────────────────────
+
+export async function replaceAttendance(items: AttendanceEntry[]): Promise<void> {
+  await db.transaction('rw', db.attendance, async () => {
+    await db.attendance.clear();
+    if (items.length) await db.attendance.bulkPut(items);
+  });
+}
+
+export async function replaceNotes(items: NoteEntry[]): Promise<void> {
+  await db.transaction('rw', db.notes, async () => {
+    await db.notes.clear();
+    if (items.length) await db.notes.bulkPut(items);
+  });
+}
+
+export async function replaceMeetings(items: MeetingEntry[]): Promise<void> {
+  await db.transaction('rw', db.meetings, async () => {
+    await db.meetings.clear();
+    if (items.length) await db.meetings.bulkPut(items);
+  });
+}
+
+export async function replaceDuties(items: DutyEntry[]): Promise<void> {
+  await db.transaction('rw', db.duties, async () => {
+    await db.duties.clear();
+    if (items.length) await db.duties.bulkPut(items);
+  });
+}
+
 // ───────────────────────────── Meta ─────────────────────────────
 
 export const META_KEYS = {
@@ -189,17 +246,25 @@ export async function isInitialSyncDone(): Promise<boolean> {
 
 // ───────────────────────────── Maintenance ─────────────────────────────
 
-/** Wipes all offline data (messages, grades, timetable, exams and metadata). */
+/** Wipes all offline data (messages, grades, timetable, exams, attendance, notes, meetings, duties and metadata). */
 export async function clearAllData(): Promise<void> {
-  await db.transaction('rw', [db.messages, db.grades, db.lessons, db.exams, db.meta], async () => {
-    await Promise.all([
-      db.messages.clear(),
-      db.grades.clear(),
-      db.lessons.clear(),
-      db.exams.clear(),
-      db.meta.clear(),
-    ]);
-  });
+  await db.transaction(
+    'rw',
+    [db.messages, db.grades, db.lessons, db.exams, db.attendance, db.notes, db.meetings, db.duties, db.meta],
+    async () => {
+      await Promise.all([
+        db.messages.clear(),
+        db.grades.clear(),
+        db.lessons.clear(),
+        db.exams.clear(),
+        db.attendance.clear(),
+        db.notes.clear(),
+        db.meetings.clear(),
+        db.duties.clear(),
+        db.meta.clear(),
+      ]);
+    },
+  );
 }
 
 /** Quick stats – handy for the settings screen. */

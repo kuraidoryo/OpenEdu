@@ -1,4 +1,16 @@
-import type { AppMode, DutyInfo, Exam, Grade, Lesson, Message, MessageFolder } from '@/models/types';
+import type {
+  AppMode,
+  AttendanceEntry,
+  DutyEntry,
+  DutyInfo,
+  Exam,
+  Grade,
+  Lesson,
+  MeetingEntry,
+  Message,
+  MessageFolder,
+  NoteEntry,
+} from '@/models/types';
 
 /** Basic info about the logged-in user, returned by `verifySession()`. */
 export interface SessionInfo {
@@ -35,6 +47,18 @@ export interface IVulcanDataProvider {
 
   /** Checks whether the student has classroom duty in the given week. */
   fetchDutyStatus(weekDate?: Date): Promise<DutyInfo>;
+
+  /** Fetches attendance entries for the week containing `weekDate` (default: current week). */
+  fetchAttendance(weekDate?: Date): Promise<AttendanceEntry[]>;
+
+  /** Fetches teacher praises and remarks. */
+  fetchNotes(): Promise<NoteEntry[]>;
+
+  /** Fetches parent-teacher meetings. */
+  fetchMeetings(): Promise<MeetingEntry[]>;
+
+  /** Fetches classroom duty roster entries. */
+  fetchDuties(weekDate?: Date): Promise<DutyEntry[]>;
 
   /** Checks if the session is valid; throws `SessionExpiredError` if not. */
   verifySession(): Promise<SessionInfo>;

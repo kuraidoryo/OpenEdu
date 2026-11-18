@@ -5,6 +5,7 @@ import { HomePage } from '@/pages/HomePage';
 import { MessagesPage } from '@/pages/MessagesPage';
 import { TimetablePage } from '@/pages/TimetablePage';
 import { GradesPage } from '@/pages/GradesPage';
+import { MorePage } from '@/pages/MorePage';
 import { SettingsAuthPage } from '@/pages/SettingsAuthPage';
 
 /**
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/messages/:messageId" element={<MessagesPage />} />
             <Route path="/timetable" element={<TimetablePage />} />
             <Route path="/grades" element={<GradesPage />} />
+            <Route path="/more" element={<MorePage />} />
             <Route path="/settings" element={<SettingsAuthPage />} />
             <Route path="*" element={<Navigate to="/home" replace />} />
           </Route>
