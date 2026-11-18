@@ -5,21 +5,26 @@ import {
   Bell,
   BellRing,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  ClipboardPaste,
   Clock,
-  Cookie,
+  Copy,
   Database,
   ExternalLink,
   HelpCircle,
   KeyRound,
   LogIn,
   LogOut,
-  Moon,
   Monitor,
+  Moon,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Sun,
   Trash2,
   UserCheck,
+  Wand2,
 } from 'lucide-react';
 import { EDUVULCAN_ENDPOINTS } from '@/api/endpoints.config';
 import { useApp } from '@/context/AppContext';
@@ -30,6 +35,10 @@ import {
   type PollingInterval,
   type ThemePreference,
 } from '@/services/session.service';
+import {
+  isNativeAndroidAuthAvailable,
+  parseSmartAuthInput,
+} from '@/services/vulcan-auth.plugin';
 
 export function SettingsAuthPage() {
   const {
@@ -38,6 +47,7 @@ export function SettingsAuthPage() {
     switchMode,
     loginDemo,
     loginLive,
+    loginWithWebView,
     logout,
     updateSettings,
     clearOfflineData,
@@ -47,10 +57,16 @@ export function SettingsAuthPage() {
 
   const [tenantInput, setTenantInput] = useState(session.tenant || '');
   const [cookieInput, setCookieInput] = useState(session.sessionCookie || '');
+  const [smartInput, setSmartInput] = useState('');
+  const [smartFeedback, setSmartFeedback] = useState<string | null>(null);
+  const [showManualFields, setShowManualFields] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isWebViewLoggingIn, setIsWebViewLoggingIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [confirmClearDb, setConfirmClearDb] = useState(false);
+
+  const isNativeAndroid = isNativeAndroidAuthAvailable();
 
   const dbStats = useLiveQuery(
     () => getDatabaseStats(),
@@ -58,23 +74,117 @@ export function SettingsAuthPage() {
     { messages: 0, grades: 0, lessons: 0 },
   );
 
+  // ─────────────── Solution 1: 1-Click In-App WebView Login ───────────────
+  const handleWebViewLogin = async () => {
+    setAuthError(null);
+    setIsWebViewLoggingIn(true);
+    try {
+      const res = await loginWithWebView();
+      setTenantInput(res.tenant);
+      setCookieInput(res.sessionCookie);
+      showToast(
+        'info',
+        '✅ Zalogowano do eduVULCAN',
+        `Pobrano sesję dla jednostki "${res.tenant}" i zsynchronizowano dane offline.`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Logowanie WebView nie powiodło się.';
+      setAuthError(msg);
+      if (!isNativeAndroid) {
+        setShowGuide(true);
+      }
+    } finally {
+      setIsWebViewLoggingIn(false);
+    }
+  };
+
+  // ─────────────── Solution 3: Smart Input Parser (URL / cURL / JSON) ───────────────
+  const handleSmartInputChange = (value: string) => {
+    setSmartInput(value);
+    setAuthError(null);
+    if (!value.trim()) {
+      setSmartFeedback(null);
+      return;
+    }
+
+    const parsed = parseSmartAuthInput(value);
+    setSmartFeedback(parsed.summary);
+
+    if (parsed.tenant) {
+      setTenantInput(parsed.tenant);
+    }
+    if (parsed.sessionCookie) {
+      setCookieInput(parsed.sessionCookie);
+    }
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const clipText = await navigator.clipboard.readText();
+      if (!clipText.trim()) {
+        showToast('info', 'Schowek jest pusty', 'Skopiuj wcześniej link, polecenie cURL lub JSON.');
+        return;
+      }
+      handleSmartInputChange(clipText);
+      showToast('info', '📋 Wklejono ze schowka', 'Automatycznie przeanalizowano zawartość.');
+    } catch {
+      showToast('error', 'Brak dostępu do schowka', 'Wklej tekst ręcznie w pole poniżej.');
+    }
+  };
+
+  const handleExportSessionJson = async () => {
+    const payload = JSON.stringify(
+      {
+        tenant: tenantInput.trim() || session.tenant,
+        sessionCookie: cookieInput.trim() || session.sessionCookie,
+      },
+      null,
+      2,
+    );
+    try {
+      await navigator.clipboard.writeText(payload);
+      showToast(
+        'info',
+        '📦 Skopiowano pakiet sesji JSON',
+        'Możesz go wkleić w polu Szybkiego importu na telefonie.',
+      );
+    } catch {
+      setSmartInput(payload);
+      showToast('info', 'Pakiet JSON wygenerowany', 'Skopiuj go z pola Szybkiego importu.');
+    }
+  };
+
   const handleLiveSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setAuthError(null);
-    if (!tenantInput.trim()) {
-      setAuthError('Podaj symbol szkoły / miasta z adresu URL (np. warszawa, gdansk).');
+
+    // Also allow submitting directly if the user only pasted into smartInput
+    let finalTenant = tenantInput.trim();
+    let finalCookie = cookieInput.trim();
+    if ((!finalTenant || !finalCookie) && smartInput.trim()) {
+      const parsed = parseSmartAuthInput(smartInput);
+      if (!finalTenant && parsed.tenant) finalTenant = parsed.tenant;
+      if (!finalCookie && parsed.sessionCookie) finalCookie = parsed.sessionCookie;
+    }
+
+    if (!finalTenant) {
+      setAuthError(
+        'Brakuje symbolu szkoły / miasta (np. warszawa). Wklej link z uczen.eduvulcan.pl/<symbol>/App/... lub wpisz go ręcznie.',
+      );
+      setShowManualFields(true);
       return;
     }
-    if (!cookieInput.trim()) {
-      setAuthError('Wklej zawartość nagłówka Cookie z zalogowanej sesji eduvulcan.pl.');
+    if (!finalCookie) {
+      setAuthError('Brakuje ciasteczka sesyjnego Cookie. Użyj logowania WebView lub wklej cURL / JSON.');
+      setShowManualFields(true);
       return;
     }
 
     setIsConnecting(true);
     try {
       await loginLive({
-        tenant: tenantInput.trim(),
-        sessionCookie: cookieInput.trim(),
+        tenant: finalTenant,
+        sessionCookie: finalCookie,
       });
       showToast('info', '✅ Połączono z eduVULCAN', 'Dane ucznia zostały pobrane i zapisane offline.');
     } catch (err) {
@@ -105,15 +215,13 @@ export function SettingsAuthPage() {
     <div className="flex flex-col gap-4 p-3.5">
       {/* ───────────── 1. Mode Switcher (Mock vs Live) ───────────── */}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h1 className="text-sm font-bold text-slate-900 dark:text-white">
-              Tryb źródła danych
-            </h1>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Przełączaj między realistycznymi danymi Demo a prawdziwym kontem eduVULCAN.
-            </p>
-          </div>
+        <div>
+          <h1 className="text-sm font-bold text-slate-900 dark:text-white">
+            Tryb źródła danych
+          </h1>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Przełączaj między realistycznymi danymi Demo a prawdziwym kontem eduVULCAN.
+          </p>
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800">
@@ -175,42 +283,56 @@ export function SettingsAuthPage() {
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 {session.isAuthenticated
                   ? session.schoolName
-                  : 'Połącz konto poniżej lub włącz Tryb Demo.'}
+                  : 'Zaloguj się poniżej jednym kliknięciem lub włącz Tryb Demo.'}
               </p>
             </div>
           </div>
 
-          {session.isAuthenticated ? (
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              <LogOut size={13} />
-              <span>Wyloguj</span>
-            </button>
-          ) : (
-            session.mode === 'mock' && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            {session.isAuthenticated && session.mode === 'live' && (
               <button
                 type="button"
-                onClick={() => void loginDemo()}
-                className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700"
+                onClick={() => void handleExportSessionJson()}
+                title="Skopiuj pakiet sesji JSON"
+                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
               >
-                <LogIn size={13} />
-                <span>Wczytaj Demo</span>
+                <Copy size={13} />
+                <span>JSON</span>
               </button>
-            )
-          )}
+            )}
+
+            {session.isAuthenticated ? (
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <LogOut size={13} />
+                <span>Wyloguj</span>
+              </button>
+            ) : (
+              session.mode === 'mock' && (
+                <button
+                  type="button"
+                  onClick={() => void loginDemo()}
+                  className="inline-flex items-center gap-1 rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700"
+                >
+                  <LogIn size={13} />
+                  <span>Wczytaj Demo</span>
+                </button>
+              )
+            )}
+          </div>
         </div>
       </section>
 
-      {/* ───────────── 3. Hybrid Login (WebView / Session Cookie) ───────────── */}
+      {/* ───────────── 3. Solution 1 + 3: Native WebView Login & Smart Import ───────────── */}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Cookie size={17} className="text-brand-600 dark:text-brand-400" />
+            <Smartphone size={17} className="text-emerald-600 dark:text-emerald-400" />
             <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-              Logowanie hybrydowe (eduVULCAN Live)
+              Logowanie do konta eduVULCAN
             </h2>
           </div>
           <button
@@ -219,90 +341,184 @@ export function SettingsAuthPage() {
             className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-950/60"
           >
             <HelpCircle size={13} />
-            <span>{showGuide ? 'Ukryj instrukcję' : 'Jak pobrać sesję?'}</span>
+            <span>{showGuide ? 'Ukryj pomoc' : 'Jak to działa?'}</span>
           </button>
         </div>
 
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          Autoryzacja wykorzystuje Twoją własną sesję przeglądarkową / WebView bez przesyłania hasła
-          do zewnętrznych serwerów.
-        </p>
+        {/* Solution 1: 1-Click In-App WebView Login Button */}
+        <div className="mt-3 rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/90 via-teal-50/60 to-white p-3.5 dark:border-emerald-900/60 dark:from-emerald-950/40 dark:via-teal-950/20 dark:to-slate-900">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                Rekomendowane na telefonie
+              </span>
+              <h3 className="mt-1.5 text-xs font-bold text-slate-900 dark:text-white">
+                1. Wbudowane okno logowania WebView (Bez F12)
+              </h3>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-400">
+                Otwiera stronę <code className="text-[10px]">eduvulcan.pl/logowanie</code> wewnątrz
+                aplikacji. Po wpisaniu loginu i hasła automatycznie pobiera symbol szkoły oraz
+                ciasteczka sesyjne i zamyka okno.
+              </p>
+            </div>
+          </div>
 
-        {showGuide && (
-          <div className="mt-3 space-y-2 rounded-xl border border-brand-200/80 bg-brand-50/60 p-3 text-xs text-slate-700 dark:border-brand-900/60 dark:bg-brand-950/30 dark:text-slate-300">
-            <p className="font-bold text-brand-800 dark:text-brand-300">
-              Instrukcja logowania WebView / Cookie krok po kroku:
+          <button
+            type="button"
+            onClick={() => void handleWebViewLogin()}
+            disabled={isWebViewLoggingIn}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
+          >
+            <Smartphone size={16} />
+            <span>
+              {isWebViewLoggingIn
+                ? 'Oczekiwanie na zalogowanie w oknie…'
+                : 'Zaloguj się kontem eduVULCAN (Automatycznie)'}
+            </span>
+          </button>
+        </div>
+
+        {/* Solution 3: Smart Import (Paste URL / cURL / JSON) */}
+        <form onSubmit={(e) => void handleLiveSubmit(e)} className="mt-3.5 space-y-3">
+          <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="smart-auth-input"
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200"
+              >
+                <Wand2 size={14} className="text-brand-600 dark:text-brand-400" />
+                <span>2. Szybki import (Wklej link, cURL lub JSON z PC)</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => void handlePasteFromClipboard()}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <ClipboardPaste size={12} />
+                <span>Wklej ze schowka</span>
+              </button>
+            </div>
+
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              Wklej tutaj pełny adres URL po zalogowaniu (aby automatycznie wyciągnąć symbol szkoły),
+              polecenie <em>Copy as cURL</em> lub wyeksportowany pakiet JSON:
             </p>
-            <ol className="list-decimal space-y-1.5 pl-4">
-              <li>
-                Zaloguj się na swoje konto w przeglądarce pod adresem{' '}
-                <a
-                  href={EDUVULCAN_ENDPOINTS.portal.login}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-0.5 font-semibold text-brand-600 underline dark:text-brand-400"
-                >
-                  eduvulcan.pl/logowanie <ExternalLink size={11} />
-                </a>{' '}
-                i przejdź do widoku ucznia oraz zakładki <em>Wiadomości</em>.
-              </li>
-              <li>
-                Z adresu URL typu{' '}
-                <code className="rounded bg-white px-1 py-0.5 text-[11px] dark:bg-slate-800">
-                  https://uczen.eduvulcan.pl/<strong>symbol</strong>/App/...
-                </code>{' '}
-                odczytaj <strong>symbol szkoły/miasta</strong> (`tenant`).
-              </li>
-              <li>
-                Otwórz Narzędzia deweloperskie (<kbd>F12</kbd> → zakładka <em>Network / Sieć</em>),
-                kliknij dowolne zapytanie do <code className="text-[11px]">/api/</code> i skopiuj
-                wartość nagłówka <strong>Cookie</strong> (zawierającego{' '}
-                <code className="text-[11px]">Eduvulcan.Uczen.Sso</code> oraz{' '}
-                <code className="text-[11px]">EduVulcan.Wiadomosci.Sso</code>).
-              </li>
-              <li>
-                Uwaga: ze względu na politykę CORS przeglądarek, zapytania Live z nagłówkiem{' '}
-                <code className="text-[11px]">Cookie</code> działają bezpośrednio w natywnej aplikacji
-                Android (przez <code className="text-[11px]">CapacitorHttp</code>).
-              </li>
-            </ol>
-          </div>
-        )}
 
-        <form onSubmit={(e) => void handleLiveSubmit(e)} className="mt-3 space-y-3">
-          <div>
-            <label
-              htmlFor="tenant-input"
-              className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
-            >
-              Symbol jednostki / miasta (tenant z URL)
-            </label>
-            <input
-              id="tenant-input"
-              type="text"
-              value={tenantInput}
-              onChange={(e) => setTenantInput(e.target.value)}
-              placeholder="np. warszawa, krakow, domyslny…"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="cookie-input"
-              className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
-            >
-              Ciasteczko sesyjne (Cookie: Eduvulcan.Uczen.Sso=...; EduVulcan.Wiadomosci.Sso=...)
-            </label>
             <textarea
-              id="cookie-input"
-              rows={3}
-              value={cookieInput}
-              onChange={(e) => setCookieInput(e.target.value)}
-              placeholder="Wklej zawartość nagłówka Cookie z eduvulcan.pl…"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              id="smart-auth-input"
+              rows={2}
+              value={smartInput}
+              onChange={(e) => handleSmartInputChange(e.target.value)}
+              placeholder="Wklej np. https://uczen.eduvulcan.pl/symbol/App/... albo polecenie curl / JSON…"
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white p-2.5 font-mono text-[11px] text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             />
+
+            {smartFeedback && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-brand-700 dark:text-brand-300">
+                <CheckCircle2 size={13} className="shrink-0 text-emerald-500" />
+                <span>{smartFeedback}</span>
+              </p>
+            )}
+
+            {/* Detected values pill summary */}
+            {(tenantInput || cookieInput) && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span
+                  className={clsx(
+                    'rounded-lg px-2 py-0.5 font-semibold',
+                    tenantInput
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                      : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400',
+                  )}
+                >
+                  Symbol: {tenantInput || 'brak'}
+                </span>
+                <span
+                  className={clsx(
+                    'rounded-lg px-2 py-0.5 font-semibold',
+                    cookieInput
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                      : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400',
+                  )}
+                >
+                  Cookie: {cookieInput ? `gotowe (${cookieInput.length} zn.)` : 'brak'}
+                </span>
+              </div>
+            )}
           </div>
+
+          {/* Collapsible Manual Input Fields */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowManualFields((v) => !v)}
+              className="flex w-full items-center justify-between rounded-xl px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+            >
+              <span>Zaawansowane: ręczna edycja pól Symbol (`tenant`) i `Cookie`</span>
+              {showManualFields ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+
+            {showManualFields && (
+              <div className="mt-2 space-y-2.5 rounded-xl border border-slate-200/80 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-800/30">
+                <div>
+                  <label
+                    htmlFor="tenant-input"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                  >
+                    Symbol jednostki / miasta (`tenant` z URL)
+                  </label>
+                  <input
+                    id="tenant-input"
+                    type="text"
+                    value={tenantInput}
+                    onChange={(e) => setTenantInput(e.target.value)}
+                    placeholder="np. warszawa, krakow, domyslny…"
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="cookie-input"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                  >
+                    Ciasteczko sesyjne (`Cookie`)
+                  </label>
+                  <textarea
+                    id="cookie-input"
+                    rows={3}
+                    value={cookieInput}
+                    onChange={(e) => setCookieInput(e.target.value)}
+                    placeholder="Eduvulcan.Uczen.Sso=...; EduVulcan.Wiadomosci.Sso=..."
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5 font-mono text-[11px] text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {showGuide && (
+            <div className="space-y-2 rounded-xl border border-brand-200/80 bg-brand-50/60 p-3 text-xs text-slate-700 dark:border-brand-900/60 dark:bg-brand-950/30 dark:text-slate-300">
+              <p className="font-bold text-brand-800 dark:text-brand-300">
+                Jak zalogować się najwygodniej?
+              </p>
+              <ul className="list-disc space-y-1.5 pl-4">
+                <li>
+                  <strong>Na telefonie (Android APK):</strong> Kliknij zielony przycisk{' '}
+                  <em>„Zaloguj się kontem eduVULCAN (Automatycznie)”</em>. Zaloguj się w oknie
+                  przeglądarki — aplikacja sama pobierze sesję i zamknie okno.
+                </li>
+                <li>
+                  <strong>Przeniesienie sesji z komputera (1 wklejenie):</strong> W przeglądarce na
+                  PC kliknij prawym przyciskiem na dowolne zapytanie <code className="text-[11px]">/api/</code> w
+                  zakładce Network → <em>Copy → Copy as cURL (bash)</em> i wklej całość w polu{' '}
+                  <strong>Szybki import</strong> powyżej. Symbol szkoły i ciasteczko uzupełnią się
+                  automatycznie!
+                </li>
+              </ul>
+            </div>
+          )}
 
           {authError && (
             <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
@@ -318,7 +534,7 @@ export function SettingsAuthPage() {
             >
               <LogIn size={15} />
               <span>
-                {isConnecting ? 'Weryfikacja sesji…' : 'Zapisz sesję i przełącz na Tryb Live'}
+                {isConnecting ? 'Weryfikacja sesji…' : 'Zapisz zaimportowaną sesję (Tryb Live)'}
               </span>
             </button>
 
@@ -328,7 +544,7 @@ export function SettingsAuthPage() {
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
             >
-              <span>Otwórz eduvulcan.pl</span>
+              <span>eduvulcan.pl</span>
               <ExternalLink size={13} />
             </a>
           </div>

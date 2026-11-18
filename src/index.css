@@ -22,3 +22,17 @@
     user-select: text;
   }
 }
+
+@layer utilities {
+  /**
+   * Reserves empty space at the top of the screen for the phone's system
+   * notification / status bar (clock, battery, camera cutout).
+   */
+  .status-bar-spacer {
+    height: max(env(safe-area-inset-top, 0px), 30px);
+  }
+
+  .bottom-nav-safe {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+  }
+}

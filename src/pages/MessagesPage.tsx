@@ -150,13 +150,13 @@ export function MessagesPage() {
     return (
       <div className="flex min-h-full flex-col bg-white dark:bg-slate-900">
         {/* Detail Toolbar */}
-        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white/95 px-3 py-2.5 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
+        <div className="flex items-center justify-between border-b border-slate-200/80 bg-slate-50/70 px-3.5 py-2.5 dark:border-slate-800 dark:bg-slate-900/90">
           <button
             type="button"
             onClick={handleCloseDetail}
-            className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 active:scale-95 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200/80 hover:bg-slate-100 active:scale-95 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700 dark:hover:bg-slate-700"
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={16} />
             <span>Wróć do listy</span>
           </button>
 

@@ -22,6 +22,11 @@ import {
   syncAllData,
   type SyncResult,
 } from '@/services/sync.service';
+import {
+  VulcanAuth,
+  packDomainCookies,
+  type VulcanWebLoginResult,
+} from '@/services/vulcan-auth.plugin';
 
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
@@ -44,6 +49,7 @@ export interface AppContextValue {
 
   loginDemo: () => Promise<void>;
   loginLive: (credentials: LiveCredentials) => Promise<void>;
+  loginWithWebView: () => Promise<VulcanWebLoginResult>;
   logout: () => Promise<void>;
   switchMode: (mode: AppMode) => Promise<void>;
 
@@ -253,9 +259,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [persistSession, resetLocalState],
   );
 
+  const loginWithWebView = useCallback(async (): Promise<VulcanWebLoginResult> => {
+    const res = await VulcanAuth.loginWithWebView();
+    const packedCookie =
+      res.uczenCookie || res.wiadomosciCookie
+        ? packDomainCookies(res.uczenCookie || res.sessionCookie, res.wiadomosciCookie)
+        : res.sessionCookie;
+    await loginLive({
+      tenant: res.tenant,
+      sessionCookie: packedCookie,
+    });
+    return { ...res, sessionCookie: packedCookie };
+  }, [loginLive]);
+
   const logout = useCallback(async () => {
     poller.stop();
     resetProviderCache();
+    await VulcanAuth.clearWebViewCookies().catch(() => undefined);
     await resetLocalState();
     await persistSession({ ...DEFAULT_SESSION, mode: sessionRef.current.mode });
   }, [persistSession, poller, resetLocalState]);
@@ -348,6 +368,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sessionExpired,
       loginDemo,
       loginLive,
+      loginWithWebView,
       logout,
       switchMode,
       syncNow,
@@ -370,6 +391,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sessionExpired,
       loginDemo,
       loginLive,
+      loginWithWebView,
       logout,
       switchMode,
       syncNow,

@@ -17,6 +17,7 @@ import {
   REQUEST_TIMEOUT_MS,
   buildUrl,
 } from './endpoints.config';
+import { resolveCookieForUrl } from '@/services/vulcan-auth.plugin';
 
 /**
  * Live eduVULCAN client.
@@ -170,7 +171,7 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
   private headersFor(url: string): Record<string, string> {
     const origin = new URL(url).origin;
     return {
-      Cookie: this.cookie,
+      Cookie: resolveCookieForUrl(this.cookie, url),
       'User-Agent': BROWSER_USER_AGENT,
       Accept: 'application/json, text/plain, */*',
       'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
