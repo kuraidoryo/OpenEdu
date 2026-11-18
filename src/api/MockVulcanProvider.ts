@@ -1,4 +1,4 @@
-import type { DayOfWeek, Grade, Lesson, Message, MessageFolder } from '@/models/types';
+import type { DayOfWeek, DutyInfo, Exam, Grade, Lesson, Message, MessageFolder } from '@/models/types';
 import type { IVulcanDataProvider, SessionInfo } from './IVulcanProvider';
 
 // ───────────────────────────── Helpers ─────────────────────────────
@@ -13,6 +13,29 @@ const daysAgo = (days: number, hour = 10, minute = 0): string => {
   d.setDate(d.getDate() - days);
   d.setHours(hour, minute, 0, 0);
   return d.toISOString();
+};
+
+/**
+ * Returns an ISO date for the given school day (`1..5`) in the current week.
+ * If `preferUpcoming` is true and that weekday already passed this week,
+ * returns the same weekday next week so there's always an upcoming exam.
+ */
+const dateForWeekday = (dayOfWeek: DayOfWeek, preferUpcoming = false): string => {
+  const now = new Date();
+  const monday = new Date(now);
+  const offsetFromMonday = (monday.getDay() + 6) % 7;
+  monday.setDate(monday.getDate() - offsetFromMonday);
+  monday.setHours(12, 0, 0, 0);
+
+  const target = new Date(monday);
+  target.setDate(monday.getDate() + (dayOfWeek - 1));
+  if (preferUpcoming) {
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (target.getTime() < todayStart) {
+      target.setDate(target.getDate() + 7);
+    }
+  }
+  return target.toISOString();
 };
 
 const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
@@ -126,6 +149,47 @@ function buildTimetable(): Lesson[] {
   });
 
   return lessons;
+}
+
+function buildExams(): Exam[] {
+  return [
+    {
+      id: 'mock-exam-1',
+      subject: SUBJECTS.fiz.name,
+      type: 'Kartkówka',
+      description: 'Druga zasada dynamiki Newtona i siła tarcia – zadania obliczeniowe',
+      date: dateForWeekday(2, true),
+      dayOfWeek: 2,
+      teacher: SUBJECTS.fiz.teacher,
+    },
+    {
+      id: 'mock-exam-2',
+      subject: SUBJECTS.mat.name,
+      type: 'Sprawdzian',
+      description: 'Ciągi arytmetyczne i geometryczne – wzory, suma n początkowych wyrazów i zadania tekstowe',
+      date: dateForWeekday(3, true),
+      dayOfWeek: 3,
+      teacher: SUBJECTS.mat.teacher,
+    },
+    {
+      id: 'mock-exam-3',
+      subject: SUBJECTS.bio.name,
+      type: 'Sprawdzian',
+      description: 'Genetyka klasyczna i molekularna: prawa Mendla, replikacja DNA oraz kod genetyczny',
+      date: dateForWeekday(4, true),
+      dayOfWeek: 4,
+      teacher: SUBJECTS.bio.teacher,
+    },
+    {
+      id: 'mock-exam-4',
+      subject: SUBJECTS.ang.name,
+      type: 'Kartkówka',
+      description: 'Unit 4: Conditionals (0, I, II) oraz słownictwo z rozdziału Work & Career',
+      date: dateForWeekday(5, true),
+      dayOfWeek: 5,
+      teacher: SUBJECTS.ang.teacher,
+    },
+  ];
 }
 
 function buildGrades(): Grade[] {
@@ -315,6 +379,7 @@ export class MockVulcanProvider implements IVulcanDataProvider {
   private messages: Message[] = buildMessages();
   private grades: Grade[] = buildGrades();
   private readonly lessons: Lesson[] = buildTimetable();
+  private readonly exams: Exam[] = buildExams();
   private incomingCounter = 0;
 
   async fetchMessages(folder?: MessageFolder): Promise<Message[]> {
@@ -344,6 +409,19 @@ export class MockVulcanProvider implements IVulcanDataProvider {
   async fetchTimetable(_weekDate?: Date): Promise<Lesson[]> {
     await latency();
     return this.lessons.map((l) => ({ ...l, changeInfo: l.changeInfo ? { ...l.changeInfo } : undefined }));
+  }
+
+  async fetchExams(_weekDate?: Date): Promise<Exam[]> {
+    await latency();
+    return this.exams.map((e) => ({ ...e })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  async fetchDutyStatus(_weekDate?: Date): Promise<DutyInfo> {
+    await sleep(150);
+    return {
+      isOnDutyThisWeek: true,
+      details: 'Masz dyżur klasowy w tym tygodniu (Poniedziałek – Piątek)',
+    };
   }
 
   async verifySession(): Promise<SessionInfo> {

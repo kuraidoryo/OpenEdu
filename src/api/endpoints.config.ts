@@ -43,6 +43,12 @@ export const EDUVULCAN_ENDPOINTS = {
      * Query params: `key`, `dataOd` (ISO UTC), `dataDo` (ISO UTC), `zakresDanych` (2).
      */
     timetable: '/api/PlanZajec',
+    /** Scheduled tests / exams (`dataOd`, `dataDo`, `key`). */
+    exams: '/api/Sprawdziany',
+    /** Upcoming tests / exams for dashboard (`key`). */
+    examsDashboard: '/api/SprawdzianyTablica',
+    /** Classroom duty roster (`key`, `dataOd`, `dataDo`). */
+    duties: '/api/Dyzurni',
     /** Quick unread messages counter on the student portal. */
     unreadCount: '/api/WiadomosciNieodczytane',
   },

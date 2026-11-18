@@ -8,6 +8,7 @@ import {
   Bell,
   CalendarDays,
   GraduationCap,
+  Home,
   Mail,
   RefreshCw,
   Settings,
@@ -83,6 +84,11 @@ export function MobileLayout({ children }: MobileLayoutProps) {
   const visibleError = lastError && lastError !== dismissedError ? lastError : null;
 
   const navItems = [
+    {
+      to: '/home',
+      label: 'Start',
+      icon: Home,
+    },
     {
       to: '/messages',
       label: 'Wiadomości',
@@ -267,7 +273,7 @@ export function MobileLayout({ children }: MobileLayoutProps) {
           aria-label="Główna nawigacja"
           className="bottom-nav-safe fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-md border-t border-slate-200/90 bg-white/95 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/95 sm:rounded-b-[2rem]"
         >
-          <div className="grid grid-cols-4 px-1.5 pt-1.5">
+          <div className="grid grid-cols-5 px-1 pt-1.5">
             {navItems.map(({ to, label, icon: Icon, badge, dot }) => (
               <NavLink
                 key={to}

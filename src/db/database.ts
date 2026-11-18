@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { Grade, Lesson, Message, MessageFolder } from '@/models/types';
+import type { DutyInfo, Exam, Grade, Lesson, Message, MessageFolder } from '@/models/types';
 
 /** Generic key/value record for small app metadata (e.g. last sync time). */
 export interface MetaEntry {
@@ -18,6 +18,7 @@ export class OpenEduDB extends Dexie {
   messages!: EntityTable<Message, 'id'>;
   grades!: EntityTable<Grade, 'id'>;
   lessons!: EntityTable<Lesson, 'id'>;
+  exams!: EntityTable<Exam, 'id'>;
   meta!: EntityTable<MetaEntry, 'key'>;
 
   constructor() {
@@ -28,6 +29,14 @@ export class OpenEduDB extends Dexie {
       messages: 'id, folder, isRead, dateSent, sender, [folder+dateSent]',
       grades: 'id, subject, date, category',
       lessons: 'id, dayOfWeek, [dayOfWeek+lessonNumber]',
+      meta: 'key',
+    });
+
+    this.version(2).stores({
+      messages: 'id, folder, isRead, dateSent, sender, [folder+dateSent]',
+      grades: 'id, subject, date, category',
+      lessons: 'id, dayOfWeek, [dayOfWeek+lessonNumber]',
+      exams: 'id, subject, date, dayOfWeek',
       meta: 'key',
     });
   }
@@ -131,11 +140,22 @@ export async function getLessonsByDay(dayOfWeek: number): Promise<Lesson[]> {
     .toArray();
 }
 
+// ───────────────────────────── Exams ─────────────────────────────
+
+/** Replaces all exams with a fresh snapshot from the server. */
+export async function replaceExams(exams: Exam[]): Promise<void> {
+  await db.transaction('rw', db.exams, async () => {
+    await db.exams.clear();
+    if (exams.length) await db.exams.bulkPut(exams);
+  });
+}
+
 // ───────────────────────────── Meta ─────────────────────────────
 
 export const META_KEYS = {
   lastSync: 'lastSync',
   initialSyncDone: 'initialSyncDone',
+  dutyInfo: 'dutyInfo',
 } as const;
 
 export async function getMeta(key: string): Promise<string | undefined> {
@@ -146,6 +166,22 @@ export async function setMeta(key: string, value: string): Promise<void> {
   await db.meta.put({ key, value });
 }
 
+/** Saves current week classroom duty status. */
+export async function saveDutyInfo(duty: DutyInfo): Promise<void> {
+  await setMeta(META_KEYS.dutyInfo, JSON.stringify(duty));
+}
+
+/** Reads current week classroom duty status. */
+export async function getDutyInfo(): Promise<DutyInfo> {
+  const raw = await getMeta(META_KEYS.dutyInfo);
+  if (!raw) return { isOnDutyThisWeek: false };
+  try {
+    return JSON.parse(raw) as DutyInfo;
+  } catch {
+    return { isOnDutyThisWeek: false };
+  }
+}
+
 /** Whether the database has been populated at least once (first sync guard). */
 export async function isInitialSyncDone(): Promise<boolean> {
   return (await getMeta(META_KEYS.initialSyncDone)) === 'true';
@@ -153,10 +189,16 @@ export async function isInitialSyncDone(): Promise<boolean> {
 
 // ───────────────────────────── Maintenance ─────────────────────────────
 
-/** Wipes all offline data (messages, grades, timetable and metadata). */
+/** Wipes all offline data (messages, grades, timetable, exams and metadata). */
 export async function clearAllData(): Promise<void> {
-  await db.transaction('rw', [db.messages, db.grades, db.lessons, db.meta], async () => {
-    await Promise.all([db.messages.clear(), db.grades.clear(), db.lessons.clear(), db.meta.clear()]);
+  await db.transaction('rw', [db.messages, db.grades, db.lessons, db.exams, db.meta], async () => {
+    await Promise.all([
+      db.messages.clear(),
+      db.grades.clear(),
+      db.lessons.clear(),
+      db.exams.clear(),
+      db.meta.clear(),
+    ]);
   });
 }
 

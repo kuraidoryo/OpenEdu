@@ -7,8 +7,10 @@ import {
   getStoredGradeIds,
   getStoredMessageIds,
   isInitialSyncDone,
+  replaceExams,
   replaceGrades,
   replaceLessons,
+  saveDutyInfo,
   saveMessages,
   setMeta,
 } from '@/db/database';
@@ -83,8 +85,8 @@ export function isSyncInProgress(): boolean {
 }
 
 async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOptions): Promise<SyncResult> {
-  // 1. Fetch (messages + grades are required; timetable is best-effort).
-  const [messages, grades, timetableResult] = await Promise.all([
+  // 1. Fetch (messages + grades are required; timetable, exams and duties are best-effort).
+  const [messages, grades, timetableResult, examsResult, dutyResult] = await Promise.all([
     provider.fetchMessages(),
     provider.fetchGrades(),
     provider.fetchTimetable().then(
@@ -92,6 +94,22 @@ async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOpt
       (error: unknown) => {
         if (isSessionExpiredError(error)) throw error;
         console.warn('[sync] Timetable fetch failed, keeping offline copy', error);
+        return { ok: false as const };
+      },
+    ),
+    provider.fetchExams().then(
+      (exams) => ({ ok: true as const, exams }),
+      (error: unknown) => {
+        if (isSessionExpiredError(error)) throw error;
+        console.warn('[sync] Exams fetch failed, keeping offline copy', error);
+        return { ok: false as const };
+      },
+    ),
+    provider.fetchDutyStatus().then(
+      (duty) => ({ ok: true as const, duty }),
+      (error: unknown) => {
+        if (isSessionExpiredError(error)) throw error;
+        console.warn('[sync] Duty fetch failed, keeping offline copy', error);
         return { ok: false as const };
       },
     ),
@@ -114,6 +132,8 @@ async function runSync(provider: IVulcanDataProvider, { notify = true }: SyncOpt
   await saveMessages(messages);
   await replaceGrades(grades);
   if (timetableResult.ok) await replaceLessons(timetableResult.lessons);
+  if (examsResult.ok) await replaceExams(examsResult.exams);
+  if (dutyResult.ok) await saveDutyInfo(dutyResult.duty);
 
   const syncedAt = new Date().toISOString();
   await setMeta(META_KEYS.lastSync, syncedAt);

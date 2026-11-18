@@ -1,4 +1,4 @@
-import type { AppMode, Grade, Lesson, Message, MessageFolder } from '@/models/types';
+import type { AppMode, DutyInfo, Exam, Grade, Lesson, Message, MessageFolder } from '@/models/types';
 
 /** Basic info about the logged-in user, returned by `verifySession()`. */
 export interface SessionInfo {
@@ -29,6 +29,12 @@ export interface IVulcanDataProvider {
 
   /** Fetches the timetable for the week containing `weekDate` (default: current week). */
   fetchTimetable(weekDate?: Date): Promise<Lesson[]>;
+
+  /** Fetches scheduled exams/quizzes for the current/upcoming weeks. */
+  fetchExams(weekDate?: Date): Promise<Exam[]>;
+
+  /** Checks whether the student has classroom duty in the given week. */
+  fetchDutyStatus(weekDate?: Date): Promise<DutyInfo>;
 
   /** Checks if the session is valid; throws `SessionExpiredError` if not. */
   verifySession(): Promise<SessionInfo>;

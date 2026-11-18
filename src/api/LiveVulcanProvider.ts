@@ -1,6 +1,8 @@
 import { CapacitorHttp, type HttpResponse } from '@capacitor/core';
 import type {
   DayOfWeek,
+  DutyInfo,
+  Exam,
   Grade,
   Lesson,
   LessonChangeInfo,
@@ -553,5 +555,136 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
     }
 
     return parsed;
+  }
+
+  // ─────────────── Exams ───────────────
+
+  async fetchExams(weekDate: Date = new Date()): Promise<Exam[]> {
+    const ctx = await this.loadContext();
+    const { from } = weekRange(weekDate);
+    const to = new Date(from);
+    to.setDate(from.getDate() + 13);
+    to.setHours(23, 59, 59, 999);
+
+    let raw: unknown;
+    try {
+      raw = await this.request(
+        'GET',
+        this.studentUrl(EP.student.exams, {
+          key: ctx.studentKey,
+          dataOd: from.toISOString(),
+          dataDo: to.toISOString(),
+        }),
+      );
+    } catch (err) {
+      if (err instanceof SessionExpiredError) throw err;
+      raw = await this.request(
+        'GET',
+        this.studentUrl(EP.student.examsDashboard, { key: ctx.studentKey }),
+      );
+    }
+
+    const root = asObj(raw);
+    const items = Array.isArray(raw)
+      ? raw
+      : asArr(root.sprawdziany ?? root.items ?? root.data);
+
+    return items
+      .map(asObj)
+      .map((e): Exam | null => {
+        const subject = str(e, 'przedmiotNazwa', 'przedmiot', 'nazwaPrzedmiotu', 'subject');
+        const dateRaw = str(e, 'data', 'dataSprawdzianu', 'termin', 'date');
+        if (!subject && !dateRaw) return null;
+
+        const isoDate = toIsoDate(dateRaw);
+        const parsedDate = new Date(isoDate);
+        const jsDay = Number.isNaN(parsedDate.getTime()) ? 1 : parsedDate.getDay();
+        const dayOfWeek = (jsDay === 0 ? 7 : jsDay) as DayOfWeek;
+
+        const rawType = str(e, 'rodzaj', 'typ', 'kategoria', 'type');
+        let type = rawType || 'Sprawdzian';
+        if (/kartk/i.test(type)) type = 'Kartkówka';
+        else if (/klasow/i.test(type)) type = 'Praca klasowa';
+        else if (/sprawdz/i.test(type)) type = 'Sprawdzian';
+
+        const description =
+          str(e, 'opis', 'temat', 'zakres', 'nazwa', 'description') || 'Brak opisu zakresu materiału';
+        const teacher = str(e, 'nauczyciel', 'prowadzacy', 'nauczycielImieNazwisko', 'teacher');
+
+        return {
+          id: str(e, 'id', 'Id') || hashId('exam', subject, isoDate, type, description),
+          subject: subject || 'Przedmiot',
+          type,
+          description,
+          date: isoDate,
+          dayOfWeek,
+          teacher,
+        };
+      })
+      .filter((e): e is Exam => e !== null)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  // ─────────────── Classroom Duties ───────────────
+
+  async fetchDutyStatus(weekDate: Date = new Date()): Promise<DutyInfo> {
+    const ctx = await this.loadContext();
+    const { from, to } = weekRange(weekDate);
+
+    try {
+      const raw = await this.request(
+        'GET',
+        this.studentUrl(EP.student.duties, {
+          key: ctx.studentKey,
+          dataOd: from.toISOString(),
+          dataDo: to.toISOString(),
+        }),
+      );
+
+      const root = asObj(raw);
+      const list = Array.isArray(raw)
+        ? raw
+        : asArr(root.dyzurni ?? root.items ?? root.data);
+
+      if (list.length === 0) {
+        return { isOnDutyThisWeek: false };
+      }
+
+      const studentTokens = ctx.userName
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((p) => p.length > 2);
+
+      const entries = list.map(asObj);
+      const matched = entries.find((item) => {
+        if (bool(item, 'czyJa', 'isCurrentUser', 'mojDyzur', 'isDuty')) return true;
+        const text = JSON.stringify(item).toLowerCase();
+        return studentTokens.length > 0 && studentTokens.every((t) => text.includes(t));
+      });
+
+      if (matched) {
+        const desc = str(matched, 'opis', 'uwagi', 'zadania');
+        return {
+          isOnDutyThisWeek: true,
+          details: desc || 'Masz dyżur klasowy w tym tygodniu.',
+        };
+      }
+
+      // If API returns entries specifically filtered for the current student without name fields
+      const hasAnyNamedPerson = entries.some((item) =>
+        Boolean(str(item, 'uczen', 'imieNazwisko', 'nazwisko', 'osoba')),
+      );
+      if (!hasAnyNamedPerson && entries.length > 0) {
+        return {
+          isOnDutyThisWeek: true,
+          details: 'Masz dyżur klasowy w tym tygodniu.',
+        };
+      }
+
+      return { isOnDutyThisWeek: false };
+    } catch (err) {
+      if (err instanceof SessionExpiredError) throw err;
+      return { isOnDutyThisWeek: false };
+    }
   }
 }

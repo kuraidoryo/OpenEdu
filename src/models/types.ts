@@ -124,3 +124,24 @@ export const DEFAULT_SESSION: AuthSession = {
   lastSync: null,
   mode: 'mock',
 };
+
+/** Type of scheduled test/exam. */
+export type ExamType = 'Sprawdzian' | 'Kartkówka' | 'Praca klasowa' | (string & {});
+
+/** Scheduled exam or quiz from the diary. */
+export interface Exam {
+  id: string;
+  subject: string;
+  type: ExamType;
+  description: string;
+  /** ISO 8601 date string. */
+  date: string;
+  dayOfWeek: DayOfWeek;
+  teacher: string;
+}
+
+/** Student's classroom duty status for the current week. */
+export interface DutyInfo {
+  isOnDutyThisWeek: boolean;
+  details?: string;
+}
