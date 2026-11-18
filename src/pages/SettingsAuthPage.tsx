@@ -4,18 +4,17 @@ import clsx from 'clsx';
 import {
   Bell,
   BellRing,
+  CalendarDays,
+  CalendarRange,
   CheckCircle2,
   Clock,
   Database,
   HelpCircle,
-  KeyRound,
-  LogIn,
   LogOut,
   Monitor,
   Moon,
   ShieldCheck,
   Smartphone,
-  Sparkles,
   Sun,
   Trash2,
   UserCheck,
@@ -27,14 +26,13 @@ import {
   POLLING_INTERVALS,
   type PollingInterval,
   type ThemePreference,
+  type TimetableViewMode,
 } from '@/services/session.service';
 
 export function SettingsAuthPage() {
   const {
     session,
     settings,
-    switchMode,
-    loginDemo,
     loginWithWebView,
     logout,
     updateSettings,
@@ -91,49 +89,7 @@ export function SettingsAuthPage() {
 
   return (
     <div className="flex flex-col gap-4 p-3.5">
-      {/* ───────────── 1. Mode Switcher (Mock vs Live) ───────────── */}
-      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div>
-          <h1 className="text-sm font-bold text-slate-900 dark:text-white">
-            Tryb źródła danych
-          </h1>
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            Przełączaj między realistycznymi danymi Demo a prawdziwym kontem eduVULCAN.
-          </p>
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800">
-          <button
-            type="button"
-            onClick={() => void switchMode('mock')}
-            className={clsx(
-              'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition',
-              session.mode === 'mock'
-                ? 'bg-violet-600 text-white shadow-sm'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white',
-            )}
-          >
-            <Sparkles size={15} />
-            <span>Tryb Demo (Mock)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void switchMode('live')}
-            className={clsx(
-              'flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition',
-              session.mode === 'live'
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white',
-            )}
-          >
-            <KeyRound size={15} />
-            <span>Tryb Live (eduVULCAN)</span>
-          </button>
-        </div>
-      </section>
-
-      {/* ───────────── 2. Current Session Status Card ───────────── */}
+      {/* ───────────── 1. Current Session Status Card ───────────── */}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
@@ -141,9 +97,7 @@ export function SettingsAuthPage() {
               className={clsx(
                 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm',
                 session.isAuthenticated
-                  ? session.mode === 'mock'
-                    ? 'bg-violet-600'
-                    : 'bg-emerald-600'
+                  ? 'bg-emerald-600'
                   : 'bg-slate-400 dark:bg-slate-700',
               )}
             >
@@ -161,34 +115,21 @@ export function SettingsAuthPage() {
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 {session.isAuthenticated
                   ? session.schoolName
-                  : 'Zaloguj się poniżej lub włącz Tryb Demo.'}
+                  : 'Zaloguj się poniżej kontem eduVULCAN.'}
               </p>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5">
-            {session.isAuthenticated ? (
-              <button
-                type="button"
-                onClick={() => void logout()}
-                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-              >
-                <LogOut size={13} />
-                <span>Wyloguj</span>
-              </button>
-            ) : (
-              session.mode === 'mock' && (
-                <button
-                  type="button"
-                  onClick={() => void loginDemo()}
-                  className="inline-flex items-center gap-1 rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700"
-                >
-                  <LogIn size={13} />
-                  <span>Wczytaj Demo</span>
-                </button>
-              )
-            )}
-          </div>
+          {session.isAuthenticated && (
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <LogOut size={13} />
+              <span>Wyloguj</span>
+            </button>
+          )}
         </div>
       </section>
 
@@ -307,7 +248,7 @@ export function SettingsAuthPage() {
         </button>
       </section>
 
-      {/* ───────────── 5. Appearance / Dark Mode ───────────── */}
+      {/* ───────────── 5. Appearance / Dark Mode & Timetable View ───────────── */}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="text-sm font-bold text-slate-900 dark:text-white">Wygląd aplikacji</h2>
         <div className="mt-2.5 grid grid-cols-3 gap-2">
@@ -330,6 +271,42 @@ export function SettingsAuthPage() {
               </button>
             );
           })}
+        </div>
+
+        <div className="mt-4 border-t border-slate-100 pt-3.5 dark:border-slate-800">
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+            Widok planu lekcji
+          </h3>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {(
+              [
+                { value: 'day', label: 'Jeden dzień', icon: CalendarDays },
+                { value: 'week', label: 'Cały tydzień', icon: CalendarRange },
+              ] as ReadonlyArray<{
+                value: TimetableViewMode;
+                label: string;
+                icon: typeof CalendarDays;
+              }>
+            ).map(({ value, label, icon: Icon }) => {
+              const active = settings.timetableViewMode === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => void updateSettings({ timetableViewMode: value })}
+                  className={clsx(
+                    'flex items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-semibold transition',
+                    active
+                      ? 'border-brand-600 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-950/70 dark:text-brand-300'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
+                  )}
+                >
+                  <Icon size={14} />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </section>
 

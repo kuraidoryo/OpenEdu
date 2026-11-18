@@ -270,12 +270,11 @@ export function HomePage() {
               <li key={grade.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
                 <div
                   className={clsx(
-                    'flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-xl text-sm font-extrabold shadow-sm',
+                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold shadow-sm',
                     getGradeBadgeClass(grade.value),
                   )}
                 >
                   <span className="leading-none">{grade.value}</span>
-                  <span className="mt-0.5 text-[9px] font-medium opacity-90">w:{grade.weight}</span>
                 </div>
 
                 <div className="min-w-0 flex-1">

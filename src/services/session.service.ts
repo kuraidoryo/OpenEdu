@@ -17,16 +17,20 @@ export type PollingInterval = (typeof POLLING_INTERVALS)[number];
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
+export type TimetableViewMode = 'day' | 'week';
+
 export interface AppSettings {
   pollingIntervalMin: PollingInterval;
   notificationsEnabled: boolean;
   theme: ThemePreference;
+  timetableViewMode: TimetableViewMode;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   pollingIntervalMin: 30,
   notificationsEnabled: true,
   theme: 'system',
+  timetableViewMode: 'day',
 };
 
 async function readJson<T>(key: string): Promise<T | null> {
@@ -61,6 +65,9 @@ export const SessionService = {
     const stored = await readJson<Partial<AppSettings>>(KEYS.settings);
     const merged = { ...DEFAULT_SETTINGS, ...stored };
     if (!POLLING_INTERVALS.includes(merged.pollingIntervalMin)) merged.pollingIntervalMin = DEFAULT_SETTINGS.pollingIntervalMin;
+    if (merged.timetableViewMode !== 'day' && merged.timetableViewMode !== 'week') {
+      merged.timetableViewMode = DEFAULT_SETTINGS.timetableViewMode;
+    }
     return merged;
   },
 

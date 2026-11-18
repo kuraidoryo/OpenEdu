@@ -157,11 +157,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSettings(storedSettings);
       settingsRef.current = storedSettings;
 
-      // First launch → start in Demo mode so the app is usable immediately.
-      const initial = storedSession ?? { ...DEFAULT_SESSION, isAuthenticated: true, mode: 'mock' as const, userName: 'Demo' };
+      // Default to live mode (clear any legacy mock data if present)
+      let initial = storedSession;
+      if (!initial || initial.mode === 'mock') {
+        await clearAllData();
+        initial = { ...DEFAULT_SESSION, mode: 'live', isAuthenticated: false };
+        await SessionService.saveSession(initial);
+      }
       sessionRef.current = initial;
       setSession(initial);
-      if (!storedSession) await SessionService.saveSession(initial);
 
       setIsReady(true);
       if (storedSettings.notificationsEnabled) void NotificationService.requestPermission();

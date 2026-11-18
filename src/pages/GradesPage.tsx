@@ -77,19 +77,31 @@ export function parseGradeNumericValue(raw: string): number | null {
   return null;
 }
 
-/** Computes weighted average for a list of grades. Returns `null` if no weighted numeric grades exist. */
+/**
+ * Computes weighted average for a list of grades.
+ * If all numeric grades in the list have weight <= 0, treats each of them as weight 1.
+ */
 export function computeWeightedAverage(
   items: ReadonlyArray<{ value: string; weight: number }>,
 ): number | null {
+  const numericItems: Array<{ num: number; weight: number }> = [];
+  for (const item of items) {
+    const num = parseGradeNumericValue(item.value);
+    if (num !== null) {
+      numericItems.push({ num, weight: item.weight });
+    }
+  }
+  if (numericItems.length === 0) return null;
+
+  const allZeroWeight = numericItems.every((x) => x.weight <= 0);
   let weightedSum = 0;
   let totalWeight = 0;
 
-  for (const item of items) {
-    if (item.weight <= 0) continue;
-    const num = parseGradeNumericValue(item.value);
-    if (num === null) continue;
-    weightedSum += num * item.weight;
-    totalWeight += item.weight;
+  for (const item of numericItems) {
+    const effectiveWeight = allZeroWeight ? 1 : item.weight;
+    if (effectiveWeight <= 0) continue;
+    weightedSum += item.num * effectiveWeight;
+    totalWeight += effectiveWeight;
   }
 
   return totalWeight > 0 ? weightedSum / totalWeight : null;
@@ -156,10 +168,21 @@ export function GradesPage() {
       .map(([subject, grades]) => {
         const sortedGrades = [...grades].sort((a, b) => a.date.localeCompare(b.date));
         const subjectVirtual = virtualGrades.filter((v) => v.subject === subject);
-        const baseAverage = computeWeightedAverage(sortedGrades);
+
+        // If every numeric real grade for this subject has weight <= 0, treat them as weight 1
+        const realNumeric = sortedGrades.filter((g) => parseGradeNumericValue(g.value) !== null);
+        const allRealZeroWeight =
+          realNumeric.length > 0 && realNumeric.every((g) => g.weight <= 0);
+        const normalizedReal = allRealZeroWeight
+          ? sortedGrades.map((g) =>
+              parseGradeNumericValue(g.value) !== null ? { ...g, weight: 1 } : g,
+            )
+          : sortedGrades;
+
+        const baseAverage = computeWeightedAverage(normalizedReal);
         const simulatedAverage =
           subjectVirtual.length > 0
-            ? computeWeightedAverage([...sortedGrades, ...subjectVirtual])
+            ? computeWeightedAverage([...normalizedReal, ...subjectVirtual])
             : baseAverage;
         const teacher = sortedGrades.find((g) => g.teacher)?.teacher ?? '';
 

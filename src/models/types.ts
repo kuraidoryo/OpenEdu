@@ -122,7 +122,7 @@ export const DEFAULT_SESSION: AuthSession = {
   sessionCookie: '',
   tenant: '',
   lastSync: null,
-  mode: 'mock',
+  mode: 'live',
 };
 
 /** Type of scheduled test/exam. */
