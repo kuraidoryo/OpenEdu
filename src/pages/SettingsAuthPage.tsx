@@ -10,6 +10,8 @@ import {
   Clock,
   Database,
   HelpCircle,
+  KeyRound,
+  Lock,
   LogOut,
   Monitor,
   Moon,
@@ -33,7 +35,10 @@ export function SettingsAuthPage() {
   const {
     session,
     settings,
+    savedCredentialsEmail,
     loginWithWebView,
+    saveAutoLoginCredentials,
+    clearAutoLoginCredentials,
     logout,
     updateSettings,
     clearOfflineData,
@@ -45,6 +50,10 @@ export function SettingsAuthPage() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [confirmClearDb, setConfirmClearDb] = useState(false);
+  const [credEmail, setCredEmail] = useState('');
+  const [credPassword, setCredPassword] = useState('');
+  const [credError, setCredError] = useState<string | null>(null);
+  const [isSavingCreds, setIsSavingCreds] = useState(false);
 
   const dbStats = useLiveQuery(
     () => getDatabaseStats(),
@@ -79,6 +88,36 @@ export function SettingsAuthPage() {
   const handleTestNotification = async () => {
     await requestNotificationPermission();
     await sendTestNotification();
+  };
+
+  const handleSaveCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCredError(null);
+    if (!credEmail.trim() || !credPassword) {
+      setCredError('Wpisz adres e-mail i hasło do konta eduVULCAN.');
+      return;
+    }
+    setIsSavingCreds(true);
+    try {
+      await saveAutoLoginCredentials(credEmail.trim(), credPassword);
+      setCredPassword('');
+      showToast(
+        'info',
+        '🔒 Dane zapisane bezpiecznie',
+        'Zaszyfrowano w Android Keystore do automatycznego odnawiania sesji.',
+      );
+    } catch (err) {
+      setCredError(err instanceof Error ? err.message : 'Nie udało się zapisać danych.');
+    } finally {
+      setIsSavingCreds(false);
+    }
+  };
+
+  const handleClearCredentials = async () => {
+    await clearAutoLoginCredentials();
+    setCredEmail('');
+    setCredPassword('');
+    showToast('info', '🗑️ Usunięto zapisane dane', 'Usunięto zaszyfrowane dane logowania z telefonu.');
   };
 
   const themeOptions: ReadonlyArray<{ value: ThemePreference; label: string; icon: typeof Sun }> = [
@@ -178,6 +217,96 @@ export function SettingsAuthPage() {
           <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
             {authError}
           </p>
+        )}
+      </section>
+
+      {/* ───────────── 3b. Session Keep-Alive & Auto-Relogin (Android Keystore) ───────────── */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <KeyRound size={17} className="text-brand-600 dark:text-brand-400" />
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Automatyczne odnawianie sesji
+            </h2>
+          </div>
+
+          <label className="relative inline-flex cursor-pointer items-center">
+            <input
+              type="checkbox"
+              checked={settings.autoReloginEnabled}
+              onChange={(e) =>
+                void updateSettings({ autoReloginEnabled: e.target.checked })
+              }
+              className="peer sr-only"
+            />
+            <div className="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-brand-600 peer-checked:after:translate-x-full dark:bg-slate-700" />
+          </label>
+        </div>
+
+        <p className="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+          OpenEdu automatycznie podtrzymuje sesję i cicho odświeża ciasteczka SSO w tle. Możesz
+          opcjonalnie zapisać dane logowania w szyfrowanym{' '}
+          <strong className="font-semibold text-slate-700 dark:text-slate-300">
+            Android Keystore
+          </strong>
+          , aby aplikacja odnowiła sesję nawet po wygaśnięciu głównego logowania SSO.
+        </p>
+
+        {savedCredentialsEmail ? (
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2.5 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+            <div className="flex min-w-0 items-center gap-2">
+              <Lock size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                  Zapisane szyfrowane logowanie
+                </p>
+                <p className="truncate text-xs text-emerald-700 dark:text-emerald-400">
+                  {savedCredentialsEmail}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleClearCredentials()}
+              className="shrink-0 rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:bg-slate-900 dark:text-rose-400"
+            >
+              Usuń
+            </button>
+          </div>
+        ) : (
+          settings.autoReloginEnabled && (
+            <form onSubmit={(e) => void handleSaveCredentials(e)} className="mt-3 flex flex-col gap-2">
+              <input
+                type="email"
+                autoComplete="username"
+                placeholder="E-mail / login eduVULCAN"
+                value={credEmail}
+                onChange={(e) => setCredEmail(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none focus:border-brand-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+              <input
+                type="password"
+                autoComplete="current-password"
+                placeholder="Hasło eduVULCAN"
+                value={credPassword}
+                onChange={(e) => setCredPassword(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none focus:border-brand-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+              {credError && (
+                <p className="text-xs font-medium text-rose-600 dark:text-rose-400">{credError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={isSavingCreds}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-700 active:scale-[0.99] disabled:opacity-60"
+              >
+                <Lock size={13} />
+                <span>
+                  {isSavingCreds ? 'Szyfrowanie…' : 'Zapisz bezpiecznie na telefonie'}
+                </span>
+              </button>
+            </form>
+          )
         )}
       </section>
 

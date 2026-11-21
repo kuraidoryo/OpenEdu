@@ -195,6 +195,7 @@ export class LiveVulcanProvider implements IVulcanDataProvider {
       uczenCookie,
       wiadomosciCookie,
       tenant: this.tenant,
+      force: false,
     }).catch(() => undefined);
     this.cookiesRestored = true;
   }

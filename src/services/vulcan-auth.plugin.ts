@@ -12,6 +12,13 @@ export interface VulcanWebLoginResult {
   uczenCookie?: string;
   /** Cookies specifically for `wiadomosci.eduvulcan.pl`. */
   wiadomosciCookie?: string;
+  /** How a silent refresh obtained fresh cookies (`sso` or `autologin`). */
+  refreshedBy?: 'sso' | 'autologin';
+}
+
+export interface CredentialsStatus {
+  hasCredentials: boolean;
+  email: string;
 }
 
 export interface VulcanAuthPlugin {
@@ -23,15 +30,40 @@ export interface VulcanAuthPlugin {
    */
   loginWithWebView(): Promise<VulcanWebLoginResult>;
 
+  /**
+   * Attempts a silent background session refresh via an invisible WebView using
+   * existing persistent SSO cookies in Android's CookieManager (and optionally
+   * Android Keystore encrypted credentials if SSO itself has expired).
+   */
+  refreshSessionSilently(options: {
+    tenant: string;
+    allowAutoLogin?: boolean;
+  }): Promise<VulcanWebLoginResult>;
+
+  /** Reads the latest cookies currently stored in Android's native CookieManager. */
+  getCurrentCookies(options?: {
+    tenant?: string;
+  }): Promise<{ uczenCookie: string; wiadomosciCookie: string; sessionCookie: string }>;
+
   /** Restores stored domain cookies into Android's native WebView CookieManager. */
   restoreCookies(options: {
     uczenCookie: string;
     wiadomosciCookie?: string;
     tenant?: string;
+    force?: boolean;
   }): Promise<void>;
 
   /** Clears all WebView cookies (used on logout). */
   clearWebViewCookies(): Promise<void>;
+
+  /** Encrypts and saves eduVULCAN login credentials locally in Android Keystore. */
+  saveCredentials(options: { email: string; password: string }): Promise<void>;
+
+  /** Returns whether encrypted credentials are stored locally (and the email address). */
+  getCredentialsStatus(): Promise<CredentialsStatus>;
+
+  /** Deletes saved encrypted credentials from Android Keystore. */
+  clearCredentials(): Promise<void>;
 }
 
 export const VulcanAuth = registerPlugin<VulcanAuthPlugin>('VulcanAuth', {
@@ -42,10 +74,25 @@ export const VulcanAuth = registerPlugin<VulcanAuthPlugin>('VulcanAuth', {
         'Logowanie przez WebView działa bezpośrednio w aplikacji na Androidzie.',
       );
     },
+    async refreshSessionSilently(): Promise<VulcanWebLoginResult> {
+      throw new Error('UNSUPPORTED_ON_WEB');
+    },
+    async getCurrentCookies() {
+      return { uczenCookie: '', wiadomosciCookie: '', sessionCookie: '' };
+    },
     async restoreCookies(): Promise<void> {
       // No-op in web browser
     },
     async clearWebViewCookies(): Promise<void> {
+      // No-op in web browser
+    },
+    async saveCredentials(): Promise<void> {
+      throw new Error('Szyfrowane zapisywanie danych działa w aplikacji na Androidzie.');
+    },
+    async getCredentialsStatus(): Promise<CredentialsStatus> {
+      return { hasCredentials: false, email: '' };
+    },
+    async clearCredentials(): Promise<void> {
       // No-op in web browser
     },
   }),

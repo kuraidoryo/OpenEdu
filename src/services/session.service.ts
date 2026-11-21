@@ -24,6 +24,8 @@ export interface AppSettings {
   notificationsEnabled: boolean;
   theme: ThemePreference;
   timetableViewMode: TimetableViewMode;
+  /** Allow automatic re-login using locally encrypted Android Keystore credentials when SSO expires. */
+  autoReloginEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -31,6 +33,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notificationsEnabled: true,
   theme: 'system',
   timetableViewMode: 'day',
+  autoReloginEnabled: true,
 };
 
 async function readJson<T>(key: string): Promise<T | null> {

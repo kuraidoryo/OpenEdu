@@ -7,7 +7,6 @@ import {
   Award,
   Bell,
   CalendarDays,
-  GraduationCap,
   Home,
   LayoutGrid,
   Mail,
@@ -179,8 +178,12 @@ export function MobileLayout({ children }: MobileLayoutProps) {
             <div className="flex items-center justify-between gap-2.5">
               {/* Brand + Student summary */}
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-md shadow-brand-600/20">
-                  <GraduationCap size={21} />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm">
+                  <img
+                    src="/logo.png"
+                    alt="OpenEdu"
+                    className="h-full w-full object-contain"
+                  />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">

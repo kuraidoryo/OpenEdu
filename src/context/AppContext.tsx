@@ -23,6 +23,7 @@ import {
 } from '@/services/sync.service';
 import {
   VulcanAuth,
+  isNativeAndroidAuthAvailable,
   packDomainCookies,
   type VulcanWebLoginResult,
 } from '@/services/vulcan-auth.plugin';
@@ -45,10 +46,14 @@ export interface AppContextValue {
   lastSyncResult: SyncResult | null;
   /** True when Live session expired and the user must log in again. */
   sessionExpired: boolean;
+  /** Email of credentials encrypted in Android Keystore (if saved by the user). */
+  savedCredentialsEmail: string | null;
 
   loginDemo: () => Promise<void>;
   loginLive: (credentials: LiveCredentials) => Promise<void>;
   loginWithWebView: () => Promise<VulcanWebLoginResult>;
+  saveAutoLoginCredentials: (email: string, password: string) => Promise<void>;
+  clearAutoLoginCredentials: () => Promise<void>;
   logout: () => Promise<void>;
   switchMode: (mode: AppMode) => Promise<void>;
 
@@ -80,10 +85,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [savedCredentialsEmail, setSavedCredentialsEmail] = useState<string | null>(null);
 
-  // Refs so long-lived callbacks (poller) always see fresh state.
+  // Refs so long-lived callbacks (poller, keep-alive) always see fresh state.
   const sessionRef = useRef(session);
   const settingsRef = useRef(settings);
+  const refreshInFlightRef = useRef<Promise<AuthSession | null> | null>(null);
+  const lastKeepAliveRef = useRef(0);
   sessionRef.current = session;
   settingsRef.current = settings;
 
@@ -92,6 +100,81 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSession(next);
     await SessionService.saveSession(next);
   }, []);
+
+  /** Reads fresher sliding-expiration cookies from Android's CookieManager and saves them. */
+  const syncNativeCookiesToSession = useCallback(
+    async (baseSession: AuthSession, lastSync?: string): Promise<AuthSession> => {
+      let nextCookie = baseSession.sessionCookie;
+      if (isNativeAndroidAuthAvailable() && baseSession.mode === 'live' && baseSession.tenant) {
+        try {
+          const latest = await VulcanAuth.getCurrentCookies({ tenant: baseSession.tenant });
+          if (latest.uczenCookie && latest.uczenCookie.includes('Eduvulcan.Uczen.Sso')) {
+            const packed = packDomainCookies(latest.uczenCookie, latest.wiadomosciCookie);
+            if (packed) nextCookie = packed;
+          }
+        } catch {
+          // Non-critical: keep existing cookie
+        }
+      }
+
+      const updated: AuthSession = {
+        ...baseSession,
+        sessionCookie: nextCookie,
+        ...(lastSync !== undefined ? { lastSync } : {}),
+      };
+      await persistSession(updated);
+      return updated;
+    },
+    [persistSession],
+  );
+
+  /**
+   * Attempts a silent background session refresh on Android via hidden WebView
+   * (using persistent SSO cookies, and optionally Keystore-encrypted credentials).
+   * Concurrent callers share the same in-flight promise.
+   */
+  const trySilentRefresh = useCallback(async (): Promise<AuthSession | null> => {
+    const current = sessionRef.current;
+    if (!isNativeAndroidAuthAvailable() || current.mode !== 'live' || !current.tenant) {
+      return null;
+    }
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+
+    const promise = (async (): Promise<AuthSession | null> => {
+      try {
+        const res = await VulcanAuth.refreshSessionSilently({
+          tenant: current.tenant,
+          allowAutoLogin: settingsRef.current.autoReloginEnabled,
+        });
+        const packedCookie =
+          res.uczenCookie || res.wiadomosciCookie
+            ? packDomainCookies(res.uczenCookie || res.sessionCookie, res.wiadomosciCookie)
+            : res.sessionCookie;
+        if (!packedCookie) return null;
+
+        resetProviderCache();
+        const refreshed: AuthSession = {
+          ...sessionRef.current,
+          isAuthenticated: true,
+          mode: 'live',
+          tenant: res.tenant || current.tenant,
+          sessionCookie: packedCookie,
+        };
+        setSessionExpired(false);
+        await persistSession(refreshed);
+        lastKeepAliveRef.current = Date.now();
+        return refreshed;
+      } catch (err) {
+        console.warn('[auth] Silent session refresh failed:', err);
+        return null;
+      } finally {
+        refreshInFlightRef.current = null;
+      }
+    })();
+
+    refreshInFlightRef.current = promise;
+    return promise;
+  }, [persistSession]);
 
   // ─────────────── Error handling ───────────────
 
@@ -105,7 +188,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (settingsRef.current.notificationsEnabled) await NotificationService.notifySessionExpired();
         }
         resetProviderCache();
-        void VulcanAuth.clearWebViewCookies().catch(() => undefined);
+        // Do NOT wipe WebView cookies here so persistent eduvulcan.pl SSO cookies remain intact.
         await persistSession({ ...sessionRef.current, isAuthenticated: false });
       } else {
         setLastError(errorMessage(err));
@@ -118,7 +201,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const syncNow = useCallback(async (): Promise<SyncResult | null> => {
     const current = sessionRef.current;
-    if (!current.isAuthenticated) return null;
+    if (!current.isAuthenticated && !(current.mode === 'live' && current.tenant && isNativeAndroidAuthAvailable())) {
+      return null;
+    }
     if (!navigator.onLine) {
       setLastError('Brak połączenia – wyświetlane są dane offline.');
       return null;
@@ -127,17 +212,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSyncStatus('syncing');
     setLastError(null);
     try {
-      const result = await syncAllData(getProvider(current), { notify: settingsRef.current.notificationsEnabled });
+      let activeSession = current;
+      if (!activeSession.isAuthenticated) {
+        const recovered = await trySilentRefresh();
+        if (!recovered) return null;
+        activeSession = recovered;
+      }
+
+      let result: SyncResult;
+      try {
+        result = await syncAllData(getProvider(activeSession), {
+          notify: settingsRef.current.notificationsEnabled,
+        });
+      } catch (err) {
+        if (isSessionExpiredError(err)) {
+          const refreshed = await trySilentRefresh();
+          if (refreshed) {
+            activeSession = refreshed;
+            result = await syncAllData(getProvider(refreshed), {
+              notify: settingsRef.current.notificationsEnabled,
+            });
+          } else {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
+      }
+
       setLastSyncResult(result);
       setSyncStatus('success');
       setSessionExpired(false);
-      await persistSession({ ...sessionRef.current, lastSync: result.syncedAt });
+      lastKeepAliveRef.current = Date.now();
+      await syncNativeCookiesToSession(activeSession, result.syncedAt);
       return result;
     } catch (err) {
       await handleError(err);
       return null;
     }
-  }, [handleError, persistSession]);
+  }, [handleError, syncNativeCookiesToSession, trySilentRefresh]);
 
   const syncNowRef = useRef(syncNow);
   syncNowRef.current = syncNow;
@@ -148,12 +261,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [storedSession, storedSettings] = await Promise.all([
+      const [storedSession, storedSettings, credsStatus] = await Promise.all([
         SessionService.loadSession(),
         SessionService.loadSettings(),
+        VulcanAuth.getCredentialsStatus().catch(() => ({ hasCredentials: false, email: '' })),
       ]);
       if (cancelled) return;
 
+      setSavedCredentialsEmail(credsStatus.hasCredentials ? credsStatus.email : null);
       setSettings(storedSettings);
       settingsRef.current = storedSettings;
 
@@ -200,6 +315,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     poller.start(settings.pollingIntervalMin);
     return () => poller.stop();
   }, [isReady, session.isAuthenticated, settings.pollingIntervalMin, poller]);
+
+  // Lightweight session Keep-Alive (extends sliding-expiration cookies & silently refreshes if needed).
+  useEffect(() => {
+    if (!isReady || !session.isAuthenticated || session.mode !== 'live') return;
+
+    const KEEP_ALIVE_MS = 20 * 60_000;
+    const RESUME_THRESHOLD_MS = 10 * 60_000;
+
+    const runKeepAlive = async () => {
+      if (!navigator.onLine || !sessionRef.current.isAuthenticated) return;
+      lastKeepAliveRef.current = Date.now();
+      try {
+        await getProvider(sessionRef.current).verifySession();
+        await syncNativeCookiesToSession(sessionRef.current);
+      } catch (err) {
+        if (isSessionExpiredError(err)) {
+          await trySilentRefresh();
+        }
+      }
+    };
+
+    const timer = setInterval(() => void runKeepAlive(), KEEP_ALIVE_MS);
+    const onVisibility = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        Date.now() - lastKeepAliveRef.current >= RESUME_THRESHOLD_MS
+      ) {
+        void runKeepAlive();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [isReady, session.isAuthenticated, session.mode, syncNativeCookiesToSession, trySilentRefresh]);
 
   // Theme (dark mode) handling.
   useEffect(() => {
@@ -279,6 +430,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return { ...res, sessionCookie: packedCookie };
   }, [loginLive]);
 
+  const saveAutoLoginCredentials = useCallback(async (email: string, password: string) => {
+    const trimmedEmail = email.trim();
+    await VulcanAuth.saveCredentials({ email: trimmedEmail, password });
+    setSavedCredentialsEmail(trimmedEmail);
+  }, []);
+
+  const clearAutoLoginCredentials = useCallback(async () => {
+    await VulcanAuth.clearCredentials();
+    setSavedCredentialsEmail(null);
+  }, []);
+
   const logout = useCallback(async () => {
     poller.stop();
     resetProviderCache();
@@ -332,12 +494,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (!msg.isRead && msg.folder === 'inbox') await provider.markMessageAsRead(id);
       } catch (err) {
-        // Offline copy is still shown; only surface session problems.
-        if (isSessionExpiredError(err)) await handleError(err);
-        else console.warn('[openMessage]', err);
+        if (isSessionExpiredError(err)) {
+          const refreshed = await trySilentRefresh();
+          if (refreshed) {
+            try {
+              const provider = getProvider(refreshed);
+              if (!msg.content) {
+                const content = await provider.fetchMessageContent(id);
+                await saveMessageContent(id, content);
+              }
+              if (!msg.isRead && msg.folder === 'inbox') await provider.markMessageAsRead(id);
+              return;
+            } catch (retryErr) {
+              if (isSessionExpiredError(retryErr)) await handleError(retryErr);
+              else console.warn('[openMessage retry]', retryErr);
+              return;
+            }
+          }
+          await handleError(err);
+        } else {
+          console.warn('[openMessage]', err);
+        }
       }
     },
-    [handleError],
+    [handleError, trySilentRefresh],
   );
 
   // ─────────────── Demo helpers ───────────────
@@ -373,9 +553,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lastError,
       lastSyncResult,
       sessionExpired,
+      savedCredentialsEmail,
       loginDemo,
       loginLive,
       loginWithWebView,
+      saveAutoLoginCredentials,
+      clearAutoLoginCredentials,
       logout,
       switchMode,
       syncNow,
@@ -396,9 +579,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lastError,
       lastSyncResult,
       sessionExpired,
+      savedCredentialsEmail,
       loginDemo,
       loginLive,
       loginWithWebView,
+      saveAutoLoginCredentials,
+      clearAutoLoginCredentials,
       logout,
       switchMode,
       syncNow,
